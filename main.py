@@ -1,173 +1,165 @@
 #!/usr/bin/env python3
-"""Codex CLI → Telegram notification hook.
+"""Codex notify CLI.
 
-Usage in ~/.codex/config.toml:
-    notify = ["python3", "/path/to/notify-hook.py"]
-
-Tokens file (~/.codex/notify-hook-tokens.conf):
-    telegram_notify_token=123456:ABC-DEF...
-    telegram_notify_chat_id=987654321
+Usage:
+    uv run main.py                 # onboarding
+    uv run main.py install-hook
+    uv run main.py remove-hook
 """
 
-import json
+from __future__ import annotations
+
+import argparse
+import re
+import shutil
 import sys
-import time
-import urllib.parse
-import urllib.request
 from pathlib import Path
-from typing import Any, Dict, Tuple
 
-# ── paths ────────────────────────────────────────────────────────────
 CODEX_HOME = Path.home() / ".codex"
-TOKENS_CONF = CODEX_HOME / "notify-hook-tokens.conf"
-LOG_FILE = CODEX_HOME / "log" / "telegram-notification.log"
+CODEX_CONFIG = CODEX_HOME / "config.toml"
+INSTALLED_HOOK = CODEX_HOME / "notify-hook.py"
+INSTALLED_TOKENS = CODEX_HOME / "notify-hook-tokens.toml"
 
-# Telegram hard limit: 4096 chars
-MAX_LEN = 4000  # leave a small buffer
-MESSAGE_SEPARATOR = "------------------------------"
+PROJECT_ROOT = Path(__file__).resolve().parent
+SOURCE_HOOK = PROJECT_ROOT / "notify-hook.py"
+SOURCE_TOKENS = PROJECT_ROOT / "notify-hook-tokens.toml"
 
-
-# ── logging ──────────────────────────────────────────────────────────
-def log(msg: str) -> None:
-    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    ts = time.strftime("%Y-%m-%d %H:%M:%S")
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(f"[{ts}] {msg}\n")
+NOTIFY_LINE = "notify = ['python3', '~/.codex/notify-hook.py']"
 
 
-# ── payload ──────────────────────────────────────────────────────────
-def read_payload() -> Dict[str, Any]:
-    if len(sys.argv) >= 2 and sys.argv[1].strip():
-        return json.loads(sys.argv[1])
-    raw = sys.stdin.read()
-    if raw and raw.strip():
-        return json.loads(raw)
-    raise ValueError("No JSON payload in argv or stdin")
+def confirm_overwrite(path: Path) -> bool:
+    answer = input(f"{path} already exists. Overwrite? (y/N): ").strip().lower()
+    return answer in {"y", "yes"}
 
 
-# ── tokens ───────────────────────────────────────────────────────────
-def load_tokens() -> Tuple[str, str]:
-    if not TOKENS_CONF.exists():
-        raise FileNotFoundError(f"Missing: {TOKENS_CONF}")
-    kv: Dict[str, str] = {}
-    for line in TOKENS_CONF.read_text(encoding="utf-8").splitlines():
-        if "=" not in line:
-            continue
-        k, v = line.split("=", 1)
-        kv[k.strip()] = v.strip()
-    token = kv.get("telegram_notify_token", "")
-    chat_id = kv.get("telegram_notify_chat_id", "")
-    if not token or not chat_id:
-        raise ValueError(f"Missing token/chat_id in {TOKENS_CONF}")
-    return token, chat_id
+def set_notify_config() -> None:
+    CODEX_HOME.mkdir(parents=True, exist_ok=True)
+
+    if CODEX_CONFIG.exists():
+        text = CODEX_CONFIG.read_text(encoding="utf-8")
+    else:
+        text = ""
+
+    if re.search(r"(?m)^\\s*notify\\s*=.*$", text):
+        updated = re.sub(r"(?m)^\\s*notify\\s*=.*$", NOTIFY_LINE, text, count=1)
+    else:
+        suffix = "" if not text or text.endswith("\n") else "\n"
+        updated = f"{text}{suffix}{NOTIFY_LINE}\n"
+
+    CODEX_CONFIG.write_text(updated, encoding="utf-8")
 
 
-# ── message formatting ───────────────────────────────────────────────
-def truncate(text: str, limit: int) -> str:
-    if len(text) <= limit:
-        return text
-    return text[: limit - 1] + "…"
+def remove_notify_config() -> None:
+    if not CODEX_CONFIG.exists():
+        return
+
+    text = CODEX_CONFIG.read_text(encoding="utf-8")
+    updated = re.sub(r"(?m)^\\s*notify\\s*=.*$\\n?", "", text)
+    CODEX_CONFIG.write_text(updated, encoding="utf-8")
 
 
-def format_message(p: Dict[str, Any]) -> str:
-    event_type = p.get("type", "unknown")
-
-    # ── agent-turn-complete ──────────────────────────────────────
-    if event_type == "agent-turn-complete":
-        # last assistant message (markdown from Codex)
-        body = p.get("last-assistant-message", "")
-
-        # extract first meaningful line as title
-        title_line = ""
-        for line in body.splitlines():
-            stripped = line.strip().lstrip("#").strip("* ").strip()
-            if stripped:
-                title_line = stripped
-                break
-        title_line = title_line or "Turn complete"
-
-        # cwd → project name (last component)
-        cwd = p.get("cwd", "")
-        project = Path(cwd).name if cwd else "?"
-
-        # build summary: strip markdown cruft, keep it readable
-        summary = _clean_markdown(body)
-        summary = truncate(summary, 3000)
-
-        lines = [
-            f"✅  *Codex done*  —  `{project}`",
-            MESSAGE_SEPARATOR,
-            "",
-            f"📌  {_escape_md(title_line)}",
-            "",
-            _escape_md(summary),
-        ]
-        return "\n".join(lines)
-
-    # ── fallback for unknown event types ─────────────────────────
-    raw = json.dumps(p, ensure_ascii=False, indent=2)
-    return truncate(
-        f"🔔 Codex event: `{event_type}`\n{MESSAGE_SEPARATOR}\n\n```\n{raw}\n```",
-        MAX_LEN,
-    )
-
-
-def _clean_markdown(text: str) -> str:
-    """Light cleanup: collapse bullet noise, keep readable."""
-    out_lines: list[str] = []
-    for line in text.splitlines():
-        s = line.strip()
-        # turn "- **Foo** …" into "• Foo …"
-        if s.startswith("- **"):
-            s = s.replace("- **", "• ", 1).replace("**", "", 1)
-        elif s.startswith("- "):
-            s = "• " + s[2:]
-        # drop lines that are just refs like (file:line)
-        if s.startswith("(") and s.endswith(")") and ":" in s:
-            continue
-        if s:
-            out_lines.append(s)
-    return "\n".join(out_lines)
-
-
-def _escape_md(text: str) -> str:
-    """Escape Telegram MarkdownV1 special chars (minimal)."""
-    # For parse_mode=Markdown (v1), only _ * ` [ need escaping outside
-    # of our own formatting.  We leave ` alone so inline code works.
-    for ch in ("_", "[", "]"):
-        text = text.replace(ch, f"\\{ch}")
-    return text
-
-
-# ── send ─────────────────────────────────────────────────────────────
-def send(token: str, chat_id: str, text: str) -> None:
-    text = truncate(text, MAX_LEN)
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "Markdown",
-        "disable_web_page_preview": "true",
-    }
-    data = urllib.parse.urlencode(payload, encoding="utf-8").encode("utf-8")
-    req = urllib.request.Request(url, data=data, method="POST")
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        log(f"OK {resp.status}")
-
-
-# ── main ─────────────────────────────────────────────────────────────
-def main() -> int:
-    log("=== start ===")
-    try:
-        payload = read_payload()
-        token, chat_id = load_tokens()
-        text = format_message(payload)
-        send(token, chat_id, text)
-    except Exception as e:
-        log(f"ERROR: {e}")
+def install_hook() -> int:
+    if not SOURCE_HOOK.exists():
+        print(f"Missing source hook: {SOURCE_HOOK}")
         return 1
-    log("=== done ===")
+    if not SOURCE_TOKENS.exists():
+        print(f"Missing source tokens file: {SOURCE_TOKENS}")
+        return 1
+
+    CODEX_HOME.mkdir(parents=True, exist_ok=True)
+
+    if (INSTALLED_HOOK.exists() or INSTALLED_HOOK.is_symlink()) and not confirm_overwrite(
+        INSTALLED_HOOK
+    ):
+        print("Install cancelled.")
+        return 1
+
+    if (
+        INSTALLED_TOKENS.exists() or INSTALLED_TOKENS.is_symlink()
+    ) and not confirm_overwrite(INSTALLED_TOKENS):
+        print("Install cancelled.")
+        return 1
+
+    shutil.copy2(SOURCE_HOOK, INSTALLED_HOOK)
+    shutil.copy2(SOURCE_TOKENS, INSTALLED_TOKENS)
+
+    set_notify_config()
+
+    print(f"Installed hook: {INSTALLED_HOOK}")
+    print(f"Installed tokens template: {INSTALLED_TOKENS}")
+    print(f"Updated config: {CODEX_CONFIG}")
+    print("Edit ~/.codex/notify-hook-tokens.toml with real credentials.")
     return 0
+
+
+def remove_hook() -> int:
+    remove_notify_config()
+
+    if INSTALLED_HOOK.exists() or INSTALLED_HOOK.is_symlink():
+        INSTALLED_HOOK.unlink()
+        print(f"Removed hook: {INSTALLED_HOOK}")
+
+    if INSTALLED_TOKENS.exists() or INSTALLED_TOKENS.is_symlink():
+        INSTALLED_TOKENS.unlink()
+        print(f"Removed tokens file: {INSTALLED_TOKENS}")
+
+    print(f"Updated config: {CODEX_CONFIG}")
+    return 0
+
+
+def onboarding() -> int:
+    try:
+        import inquirer
+    except ImportError:
+        print("Onboarding requires 'inquirer'. Install it with: uv add inquirer")
+        return 1
+
+    questions = [
+        inquirer.List(
+            "driver",
+            message="Choose a notification driver",
+            choices=["telegram"],
+            default="telegram",
+        ),
+        inquirer.Confirm(
+            "install_now",
+            message="Install hook into ~/.codex now?",
+            default=True,
+        ),
+    ]
+    answers = inquirer.prompt(questions) or {}
+
+    driver = answers.get("driver")
+    if driver != "telegram":
+        print(f"Unsupported driver selected: {driver}")
+        return 1
+
+    if answers.get("install_now"):
+        return install_hook()
+
+    print("Run: uv run main.py install-hook")
+    return 0
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Codex notify helper CLI")
+    parser.add_argument(
+        "command",
+        nargs="?",
+        choices=["install-hook", "remove-hook"],
+        help="command to run",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv or sys.argv[1:])
+
+    if args.command == "install-hook":
+        return install_hook()
+    if args.command == "remove-hook":
+        return remove_hook()
+    return onboarding()
 
 
 if __name__ == "__main__":

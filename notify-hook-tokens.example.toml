@@ -1,0 +1,10 @@
+# Copy this file to notify-hook-tokens.toml and fill real values.
+# This file is safe to commit. Keep real tokens out of git.
+
+driver = 'telegram'
+
+[telegram]
+# Telegram bot token from @BotFather.
+token = '123456:ABCDEF_replace_me'
+# Telegram chat id or channel id.
+chat_id = '123456789'
