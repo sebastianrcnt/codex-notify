@@ -195,6 +195,37 @@ def remove_hook() -> int:
     return 0
 
 
+def status() -> int:
+    config_text = CODEX_CONFIG.read_text(encoding="utf-8") if CODEX_CONFIG.exists() else ""
+    network_state = network_access_state(config_text)
+    notify_configured = bool(re.search(r"(?m)^\s*notify\s*=.*$", config_text))
+
+    print(f"Config file: {CODEX_CONFIG} ({'exists' if CODEX_CONFIG.exists() else 'missing'})")
+    print(f"Notify configured: {'yes' if notify_configured else 'no'}")
+    if network_state is True:
+        print("Sandbox network_access: true")
+    elif network_state is False:
+        print("Sandbox network_access: false")
+    else:
+        print("Sandbox network_access: not set")
+
+    if INSTALLED_HOOK.is_symlink():
+        print(f"Hook script: {INSTALLED_HOOK} (symlink)")
+    elif INSTALLED_HOOK.exists():
+        print(f"Hook script: {INSTALLED_HOOK} (file)")
+    else:
+        print(f"Hook script: {INSTALLED_HOOK} (missing)")
+
+    if INSTALLED_TOKENS.is_symlink():
+        print(f"Tokens file: {INSTALLED_TOKENS} (symlink)")
+    elif INSTALLED_TOKENS.exists():
+        print(f"Tokens file: {INSTALLED_TOKENS} (file)")
+    else:
+        print(f"Tokens file: {INSTALLED_TOKENS} (missing)")
+
+    return 0
+
+
 def onboarding() -> int:
     if not ensure_network_access_enabled():
         return 1
@@ -237,7 +268,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["install-hook", "remove-hook"],
+        choices=["install-hook", "remove-hook", "status"],
         help="command to run",
     )
     return parser.parse_args(argv)
@@ -250,6 +281,8 @@ def main(argv: list[str] | None = None) -> int:
         return install_hook()
     if args.command == "remove-hook":
         return remove_hook()
+    if args.command == "status":
+        return status()
     return onboarding()
 
 
