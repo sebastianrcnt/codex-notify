@@ -42,11 +42,22 @@ def set_notify_config() -> None:
     else:
         text = ""
 
-    if re.search(r"(?m)^\s*notify\s*=.*$", text):
-        updated = re.sub(r"(?m)^\s*notify\s*=.*$", NOTIFY_LINE, text, count=1)
-    else:
-        suffix = "" if not text or text.endswith("\n") else "\n"
-        updated = f"{text}{suffix}{NOTIFY_LINE}\n"
+    first_section = re.search(r"(?m)^\[", text)
+    root_end = first_section.start() if first_section else len(text)
+    root_part = text[:root_end]
+    section_part = text[root_end:]
+
+    cleaned_root = re.sub(r"(?m)^\s*notify\s*=.*$\n?", "", root_part)
+    cleaned_root = cleaned_root.lstrip("\n")
+    root_suffix = cleaned_root if not cleaned_root or cleaned_root.startswith("\n") else f"\n{cleaned_root}"
+    section_suffix = (
+        section_part
+        if not section_part or section_part.startswith("\n")
+        else f"\n{section_part}"
+    )
+    updated = f"{NOTIFY_LINE}{root_suffix}{section_suffix}"
+    if updated and not updated.endswith("\n"):
+        updated += "\n"
 
     CODEX_CONFIG.write_text(updated, encoding="utf-8")
 
@@ -56,7 +67,13 @@ def remove_notify_config() -> None:
         return
 
     text = CODEX_CONFIG.read_text(encoding="utf-8")
-    updated = re.sub(r"(?m)^\s*notify\s*=.*$\n?", "", text)
+    first_section = re.search(r"(?m)^\[", text)
+    root_end = first_section.start() if first_section else len(text)
+    root_part = text[:root_end]
+    section_part = text[root_end:]
+
+    cleaned_root = re.sub(r"(?m)^\s*notify\s*=.*$\n?", "", root_part)
+    updated = f"{cleaned_root}{section_part}"
     CODEX_CONFIG.write_text(updated, encoding="utf-8")
 
 
