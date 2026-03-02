@@ -98,15 +98,27 @@ def format_message(p: Dict[str, Any]) -> str:
         # cwd → project name (last component)
         cwd = p.get("cwd", "")
         project = Path(cwd).name if cwd else "?"
+        hostname = _first_value(p, "hostname", "host", "machine")
+        session_id = _first_value(p, "session_id", "session-id", "sessionId")
+        footer = " ".join(
+            [
+                _inline_code(f"folder:{project}"),
+                _inline_code(f"host:{hostname or '?'}"),
+                _inline_code(f"sid:{session_id or '?'}"),
+            ]
+        )
 
         # build summary: strip markdown cruft, keep it readable
         summary = _clean_markdown(body)
         summary = truncate(summary, 3000)
 
         lines = [
-            f"# {project}: {_escape_md(title_line)}",
+            "*Update:*",
+            _escape_md(title_line),
             "",
             _escape_md(summary),
+            "",
+            footer,
         ]
         return "\n".join(lines)
 
@@ -133,11 +145,25 @@ def _clean_markdown(text: str) -> str:
     return "\n".join(out_lines)
 
 
+def _first_value(payload: Dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = payload.get(key)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return ""
+
+
+def _inline_code(text: str) -> str:
+    # Backticks break MarkdownV1 inline code; replace them defensively.
+    safe = text.replace("`", "'")
+    return f"`{safe}`"
+
+
 def _escape_md(text: str) -> str:
     """Escape Telegram MarkdownV1 special chars (minimal)."""
-    # For parse_mode=Markdown (v1), only _ * ` [ need escaping outside
-    # of our own formatting.  We leave ` alone so inline code works.
-    for ch in ("_", "[", "]"):
+    # For parse_mode=Markdown (v1), escape chars that commonly break text.
+    # We intentionally leave backticks as-is so inline code can still render.
+    for ch in ("_", "*", "["):
         text = text.replace(ch, f"\\{ch}")
     return text
 

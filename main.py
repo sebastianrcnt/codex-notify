@@ -142,7 +142,7 @@ def write_tokens_file(path: Path, token: str, chat_id: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
-def install_hook(*, require_network_check: bool = True) -> int:
+def install_hook(*, require_network_check: bool = True, no_overwrite: bool = False) -> int:
     if not SOURCE_HOOK.exists():
         print(f"Missing source hook: {SOURCE_HOOK}")
         return 1
@@ -153,9 +153,9 @@ def install_hook(*, require_network_check: bool = True) -> int:
     CODEX_HOME.mkdir(parents=True, exist_ok=True)
     tokens_exists = INSTALLED_TOKENS.exists() or INSTALLED_TOKENS.is_symlink()
 
-    if tokens_exists and not confirm(f"{INSTALLED_TOKENS} already exists. Overwrite"):
-        token = ""
-        chat_id = ""
+    if tokens_exists and no_overwrite:
+        should_write_tokens = False
+    elif tokens_exists and not confirm(f"{INSTALLED_TOKENS} already exists. Overwrite"):
         should_write_tokens = False
     else:
         try:
@@ -271,6 +271,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         choices=["install-hook", "remove-hook", "status"],
         help="command to run",
     )
+    parser.add_argument(
+        "--no-overwrite",
+        action="store_true",
+        help="do not overwrite existing ~/.codex/notify-hook-tokens.toml",
+    )
     return parser.parse_args(argv)
 
 
@@ -278,7 +283,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
 
     if args.command == "install-hook":
-        return install_hook()
+        return install_hook(no_overwrite=args.no_overwrite)
     if args.command == "remove-hook":
         return remove_hook()
     if args.command == "status":
