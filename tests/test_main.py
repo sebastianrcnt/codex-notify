@@ -49,6 +49,18 @@ def test_notify_line_uses_overridden_home(app) -> None:
     assert str(app.installed_hook_path()) in line
 
 
+def test_notify_line_expands_default_home(app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_home = tmp_path / "fake-home"
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    monkeypatch.setenv("HOME", str(fake_home))
+    app._last_logged_codex_home = None
+
+    expected_hook = (fake_home / ".codex" / "notify-hook.py").as_posix()
+    assert app.notify_line() == f'notify = ["python3", "{expected_hook}"]'
+    assert app.notify_value() == ["python3", expected_hook]
+    assert "~" not in app.notify_line()
+
+
 def test_set_notify_config_inserts_notify_at_root_top(app, isolated_codex_home: Path) -> None:
     config = app.codex_config_path()
     isolated_codex_home.mkdir(parents=True, exist_ok=True)

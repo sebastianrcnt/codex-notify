@@ -62,22 +62,12 @@ def installed_tokens_path() -> Path:
 
 
 def notify_line() -> str:
-    default_hook = Path.home() / ".codex" / "notify-hook.py"
-    target_hook = installed_hook_path()
-    if target_hook == default_hook:
-        hook_path = "~/.codex/notify-hook.py"
-    else:
-        hook_path = target_hook.as_posix()
+    hook_path = installed_hook_path().as_posix()
     return f'notify = ["python3", "{hook_path}"]'
 
 
 def notify_value() -> list[str]:
-    default_hook = Path.home() / ".codex" / "notify-hook.py"
-    target_hook = installed_hook_path()
-    if target_hook == default_hook:
-        hook_path = "~/.codex/notify-hook.py"
-    else:
-        hook_path = target_hook.as_posix()
+    hook_path = installed_hook_path().as_posix()
     return ["python3", hook_path]
 
 
