@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Codex notify CLI.
 
-Usage:
-    uv run main.py                 # onboarding
+사용법:
+    uv run main.py                 # 온보딩
     uv run main.py install-hook
     uv run main.py remove-hook
 """
@@ -106,38 +106,38 @@ def ensure_network_access_enabled() -> bool:
     if state is True:
         return True
 
-    print("Installation requires [sandbox_workspace_write] network_access = true.")
-    if not confirm(f"Update {CODEX_CONFIG} to enable network access"):
-        print("Install cancelled.")
+    print("설치를 위해 [sandbox_workspace_write] network_access = true 설정이 필요해요.")
+    if not confirm(f"{CODEX_CONFIG} 파일에 네트워크 접근을 허용하도록 업데이트할까요"):
+        print("설치를 취소했어요.")
         return False
 
     CODEX_HOME.mkdir(parents=True, exist_ok=True)
     updated = set_network_access_true(config_text)
     CODEX_CONFIG.write_text(updated, encoding="utf-8")
-    print(f"Updated config: {CODEX_CONFIG}")
+    print(f"설정 파일을 업데이트했어요: {CODEX_CONFIG}")
     return True
 
 
 def prompt_telegram_credentials() -> tuple[str, str]:
-    token = input("Telegram bot token: ").strip()
-    chat_id = input("Telegram chat_id: ").strip()
+    token = input("텔레그램 봇 토큰을 입력해 주세요: ").strip()
+    chat_id = input("텔레그램 chat_id를 입력해 주세요: ").strip()
 
     if not token or not chat_id:
-        raise ValueError("Both token and chat_id are required.")
+        raise ValueError("토큰과 chat_id는 모두 필수예요.")
 
     return token, chat_id
 
 
 def write_tokens_file(path: Path, token: str, chat_id: str) -> None:
     content = (
-        "# Notification driver selector.\n"
-        "# Supported value for now: telegram\n"
+        "# 알림 드라이버 선택.\n"
+        "# 현재 지원되는 값: telegram\n"
         "driver = 'telegram'\n"
         "\n"
         "[telegram]\n"
-        "# Bot token from @BotFather, format: 123456:ABC...\n"
+        "# @BotFather에서 발급받은 봇 토큰, 형식: 123456:ABC...\n"
         f"token = '{token}'\n"
-        "# Target chat/channel id, e.g. 123456789 or -1001234567890\n"
+        "# 대상 채팅/채널 id, 예: 123456789 또는 -1001234567890\n"
         f"chat_id = '{chat_id}'\n"
     )
     path.write_text(content, encoding="utf-8")
@@ -145,7 +145,7 @@ def write_tokens_file(path: Path, token: str, chat_id: str) -> None:
 
 def install_hook(*, require_network_check: bool = True, no_overwrite: bool = False) -> int:
     if not SOURCE_HOOK.exists():
-        print(f"Missing source hook: {SOURCE_HOOK}")
+        print(f"소스 훅 파일을 찾을 수 없어요: {SOURCE_HOOK}")
         return 1
 
     if require_network_check and not ensure_network_access_enabled():
@@ -156,13 +156,13 @@ def install_hook(*, require_network_check: bool = True, no_overwrite: bool = Fal
 
     if tokens_exists and no_overwrite:
         should_write_tokens = False
-    elif tokens_exists and not confirm(f"{INSTALLED_TOKENS} already exists. Overwrite"):
+    elif tokens_exists and not confirm(f"{INSTALLED_TOKENS} 파일이 이미 존재해요. 덮어쓸까요"):
         should_write_tokens = False
     else:
         try:
             token, chat_id = prompt_telegram_credentials()
         except ValueError as exc:
-            print(f"Install cancelled: {exc}")
+            print(f"설치를 취소했어요: {exc}")
             return 1
         should_write_tokens = True
 
@@ -172,12 +172,12 @@ def install_hook(*, require_network_check: bool = True, no_overwrite: bool = Fal
 
     set_notify_config()
 
-    print(f"Installed hook: {INSTALLED_HOOK}")
+    print(f"훅을 설치했어요: {INSTALLED_HOOK}")
     if should_write_tokens:
-        print(f"Installed tokens file: {INSTALLED_TOKENS}")
+        print(f"토큰 파일을 설치했어요: {INSTALLED_TOKENS}")
     else:
-        print(f"Kept existing tokens file: {INSTALLED_TOKENS}")
-    print(f"Updated config: {CODEX_CONFIG}")
+        print(f"기존 토큰 파일을 그대로 유지했어요: {INSTALLED_TOKENS}")
+    print(f"설정 파일을 업데이트했어요: {CODEX_CONFIG}")
     return 0
 
 
@@ -186,13 +186,13 @@ def remove_hook() -> int:
 
     if INSTALLED_HOOK.exists() or INSTALLED_HOOK.is_symlink():
         INSTALLED_HOOK.unlink()
-        print(f"Removed hook: {INSTALLED_HOOK}")
+        print(f"훅을 제거했어요: {INSTALLED_HOOK}")
 
     if INSTALLED_TOKENS.exists() or INSTALLED_TOKENS.is_symlink():
         INSTALLED_TOKENS.unlink()
-        print(f"Removed tokens file: {INSTALLED_TOKENS}")
+        print(f"토큰 파일을 제거했어요: {INSTALLED_TOKENS}")
 
-    print(f"Updated config: {CODEX_CONFIG}")
+    print(f"설정 파일을 업데이트했어요: {CODEX_CONFIG}")
     return 0
 
 
@@ -201,28 +201,28 @@ def status() -> int:
     network_state = network_access_state(config_text)
     notify_configured = bool(re.search(r"(?m)^\s*notify\s*=.*$", config_text))
 
-    print(f"Config file: {CODEX_CONFIG} ({'exists' if CODEX_CONFIG.exists() else 'missing'})")
-    print(f"Notify configured: {'yes' if notify_configured else 'no'}")
+    print(f"설정 파일: {CODEX_CONFIG} ({'존재함' if CODEX_CONFIG.exists() else '없음'})")
+    print(f"알림 설정 여부: {'예' if notify_configured else '아니오'}")
     if network_state is True:
-        print("Sandbox network_access: true")
+        print("샌드박스 network_access: true")
     elif network_state is False:
-        print("Sandbox network_access: false")
+        print("샌드박스 network_access: false")
     else:
-        print("Sandbox network_access: not set")
+        print("샌드박스 network_access: 설정되지 않음")
 
     if INSTALLED_HOOK.is_symlink():
-        print(f"Hook script: {INSTALLED_HOOK} (symlink)")
+        print(f"훅 스크립트: {INSTALLED_HOOK} (심볼릭 링크)")
     elif INSTALLED_HOOK.exists():
-        print(f"Hook script: {INSTALLED_HOOK} (file)")
+        print(f"훅 스크립트: {INSTALLED_HOOK} (파일)")
     else:
-        print(f"Hook script: {INSTALLED_HOOK} (missing)")
+        print(f"훅 스크립트: {INSTALLED_HOOK} (없음)")
 
     if INSTALLED_TOKENS.is_symlink():
-        print(f"Tokens file: {INSTALLED_TOKENS} (symlink)")
+        print(f"토큰 파일: {INSTALLED_TOKENS} (심볼릭 링크)")
     elif INSTALLED_TOKENS.exists():
-        print(f"Tokens file: {INSTALLED_TOKENS} (file)")
+        print(f"토큰 파일: {INSTALLED_TOKENS} (파일)")
     else:
-        print(f"Tokens file: {INSTALLED_TOKENS} (missing)")
+        print(f"토큰 파일: {INSTALLED_TOKENS} (없음)")
 
     return 0
 
@@ -234,19 +234,19 @@ def onboarding() -> int:
     try:
         import inquirer
     except ImportError:
-        print("Onboarding requires 'inquirer'. Install it with: uv add inquirer")
+        print("온보딩을 사용하려면 'inquirer'가 필요해요. 설치하려면: uv add inquirer")
         return 1
 
     questions = [
         inquirer.List(
             "driver",
-            message="Choose a notification driver",
+            message="알림 드라이버를 선택해 주세요",
             choices=["telegram"],
             default="telegram",
         ),
         inquirer.Confirm(
             "install_now",
-            message="Install hook into ~/.codex now?",
+            message="지금 바로 ~/.codex에 훅을 설치할까요?",
             default=True,
         ),
     ]
@@ -254,28 +254,28 @@ def onboarding() -> int:
 
     driver = answers.get("driver")
     if driver != "telegram":
-        print(f"Unsupported driver selected: {driver}")
+        print(f"지원하지 않는 드라이버예요: {driver}")
         return 1
 
     if answers.get("install_now"):
         return install_hook(require_network_check=False)
 
-    print("Run: uv run main.py install-hook")
+    print("다음 명령으로 설치할 수 있어요: uv run main.py install-hook")
     return 0
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Codex notify helper CLI")
+    parser = argparse.ArgumentParser(description="Codex notify 헬퍼 CLI")
     parser.add_argument(
         "command",
         nargs="?",
         choices=["install-hook", "remove-hook", "status"],
-        help="command to run",
+        help="실행할 명령",
     )
     parser.add_argument(
         "--no-overwrite",
         action="store_true",
-        help="do not overwrite existing ~/.codex/notify-hook-tokens.toml",
+        help="기존 ~/.codex/notify-hook-tokens.toml 파일을 덮어쓰지 않아요",
     )
     return parser.parse_args(argv)
 
