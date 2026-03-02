@@ -10,23 +10,68 @@
 from __future__ import annotations
 
 import argparse
+import logging
+import os
 import re
 import shutil
 import sys
 from pathlib import Path
 from typing import Optional
 
-CODEX_HOME = Path.home() / ".codex"
-CODEX_CONFIG = CODEX_HOME / "config.toml"
-INSTALLED_HOOK = CODEX_HOME / "notify-hook.py"
-INSTALLED_TOKENS = CODEX_HOME / "notify-hook-tokens.toml"
+logger = logging.getLogger(__name__)
+_last_logged_codex_home: Optional[str] = None
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 SOURCE_HOOK = PROJECT_ROOT / "notify-hook.py"
 
-NOTIFY_LINE = "notify = ['python3', '~/.codex/notify-hook.py']"
 NETWORK_SECTION_HEADER = "[sandbox_workspace_write]"
 NETWORK_LINE = "network_access = true"
+
+
+def configure_logging() -> None:
+    level_name = os.environ.get("CODEX_NOTIFY_LOG_LEVEL", "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+    logging.basicConfig(level=level, format="%(levelname)s %(name)s: %(message)s")
+
+
+def codex_home() -> Path:
+    global _last_logged_codex_home
+
+    override = os.environ.get("CODEX_HOME")
+    if override:
+        home = Path(override).expanduser()
+    else:
+        home = Path.home() / ".codex"
+
+    if str(home) != _last_logged_codex_home:
+        if override:
+            logger.info("Using CODEX_HOME override: %s", home)
+        else:
+            logger.info("Using default CODEX_HOME: %s", home)
+        _last_logged_codex_home = str(home)
+    return home
+
+
+def codex_config_path() -> Path:
+    return codex_home() / "config.toml"
+
+
+def installed_hook_path() -> Path:
+    return codex_home() / "notify-hook.py"
+
+
+def installed_tokens_path() -> Path:
+    return codex_home() / "notify-hook-tokens.toml"
+
+
+def notify_line() -> str:
+    default_hook = Path.home() / ".codex" / "notify-hook.py"
+    target_hook = installed_hook_path()
+    if target_hook == default_hook:
+        hook_path = "~/.codex/notify-hook.py"
+    else:
+        hook_path = target_hook.as_posix()
+    return f"notify = ['python3', '{hook_path}']"
 
 
 def confirm(question: str) -> bool:
@@ -35,10 +80,12 @@ def confirm(question: str) -> bool:
 
 
 def set_notify_config() -> None:
-    CODEX_HOME.mkdir(parents=True, exist_ok=True)
+    codex_home_path = codex_home()
+    codex_config = codex_config_path()
+    codex_home_path.mkdir(parents=True, exist_ok=True)
 
-    if CODEX_CONFIG.exists():
-        text = CODEX_CONFIG.read_text(encoding="utf-8")
+    if codex_config.exists():
+        text = codex_config.read_text(encoding="utf-8")
     else:
         text = ""
 
@@ -55,18 +102,20 @@ def set_notify_config() -> None:
         if not section_part or section_part.startswith("\n")
         else f"\n{section_part}"
     )
-    updated = f"{NOTIFY_LINE}{root_suffix}{section_suffix}"
+    updated = f"{notify_line()}{root_suffix}{section_suffix}"
     if updated and not updated.endswith("\n"):
         updated += "\n"
 
-    CODEX_CONFIG.write_text(updated, encoding="utf-8")
+    codex_config.write_text(updated, encoding="utf-8")
+    logger.info("Updated notify config in %s", codex_config)
 
 
 def remove_notify_config() -> None:
-    if not CODEX_CONFIG.exists():
+    codex_config = codex_config_path()
+    if not codex_config.exists():
         return
 
-    text = CODEX_CONFIG.read_text(encoding="utf-8")
+    text = codex_config.read_text(encoding="utf-8")
     first_section = re.search(r"(?m)^\[", text)
     root_end = first_section.start() if first_section else len(text)
     root_part = text[:root_end]
@@ -74,7 +123,8 @@ def remove_notify_config() -> None:
 
     cleaned_root = re.sub(r"(?m)^\s*notify\s*=.*$\n?", "", root_part)
     updated = f"{cleaned_root}{section_part}"
-    CODEX_CONFIG.write_text(updated, encoding="utf-8")
+    codex_config.write_text(updated, encoding="utf-8")
+    logger.info("Removed notify config from %s", codex_config)
 
 
 def network_access_state(config_text: str) -> Optional[bool]:
@@ -114,8 +164,10 @@ def set_network_access_true(config_text: str) -> str:
 
 
 def ensure_network_access_enabled() -> bool:
-    if CODEX_CONFIG.exists():
-        config_text = CODEX_CONFIG.read_text(encoding="utf-8")
+    codex_home_path = codex_home()
+    codex_config = codex_config_path()
+    if codex_config.exists():
+        config_text = codex_config.read_text(encoding="utf-8")
     else:
         config_text = ""
 
@@ -124,14 +176,15 @@ def ensure_network_access_enabled() -> bool:
         return True
 
     print("설치를 위해 [sandbox_workspace_write] network_access = true 설정이 필요해요.")
-    if not confirm(f"{CODEX_CONFIG} 파일에 네트워크 접근을 허용하도록 업데이트할까요"):
+    if not confirm(f"{codex_config} 파일에 네트워크 접근을 허용하도록 업데이트할까요"):
         print("설치를 취소했어요.")
         return False
 
-    CODEX_HOME.mkdir(parents=True, exist_ok=True)
+    codex_home_path.mkdir(parents=True, exist_ok=True)
     updated = set_network_access_true(config_text)
-    CODEX_CONFIG.write_text(updated, encoding="utf-8")
-    print(f"설정 파일을 업데이트했어요: {CODEX_CONFIG}")
+    codex_config.write_text(updated, encoding="utf-8")
+    print(f"설정 파일을 업데이트했어요: {codex_config}")
+    logger.info("Enabled network_access in %s", codex_config)
     return True
 
 
@@ -161,6 +214,11 @@ def write_tokens_file(path: Path, token: str, chat_id: str) -> None:
 
 
 def install_hook(*, require_network_check: bool = True, no_overwrite: bool = False) -> int:
+    installed_hook = installed_hook_path()
+    installed_tokens = installed_tokens_path()
+    codex_home_path = codex_home()
+    codex_config = codex_config_path()
+
     if not SOURCE_HOOK.exists():
         print(f"소스 훅 파일을 찾을 수 없어요: {SOURCE_HOOK}")
         return 1
@@ -168,12 +226,12 @@ def install_hook(*, require_network_check: bool = True, no_overwrite: bool = Fal
     if require_network_check and not ensure_network_access_enabled():
         return 1
 
-    CODEX_HOME.mkdir(parents=True, exist_ok=True)
-    tokens_exists = INSTALLED_TOKENS.exists() or INSTALLED_TOKENS.is_symlink()
+    codex_home_path.mkdir(parents=True, exist_ok=True)
+    tokens_exists = installed_tokens.exists() or installed_tokens.is_symlink()
 
     if tokens_exists and no_overwrite:
         should_write_tokens = False
-    elif tokens_exists and not confirm(f"{INSTALLED_TOKENS} 파일이 이미 존재해요. 덮어쓸까요"):
+    elif tokens_exists and not confirm(f"{installed_tokens} 파일이 이미 존재해요. 덮어쓸까요"):
         should_write_tokens = False
     else:
         try:
@@ -183,42 +241,52 @@ def install_hook(*, require_network_check: bool = True, no_overwrite: bool = Fal
             return 1
         should_write_tokens = True
 
-    shutil.copy2(SOURCE_HOOK, INSTALLED_HOOK)
+    shutil.copy2(SOURCE_HOOK, installed_hook)
     if should_write_tokens:
-        write_tokens_file(INSTALLED_TOKENS, token, chat_id)
+        write_tokens_file(installed_tokens, token, chat_id)
 
     set_notify_config()
 
-    print(f"훅을 설치했어요: {INSTALLED_HOOK}")
+    print(f"훅을 설치했어요: {installed_hook}")
     if should_write_tokens:
-        print(f"토큰 파일을 설치했어요: {INSTALLED_TOKENS}")
+        print(f"토큰 파일을 설치했어요: {installed_tokens}")
     else:
-        print(f"기존 토큰 파일을 그대로 유지했어요: {INSTALLED_TOKENS}")
-    print(f"설정 파일을 업데이트했어요: {CODEX_CONFIG}")
+        print(f"기존 토큰 파일을 그대로 유지했어요: {installed_tokens}")
+    print(f"설정 파일을 업데이트했어요: {codex_config}")
+    logger.info("Installed hook at %s", installed_hook)
     return 0
 
 
 def remove_hook() -> int:
+    installed_hook = installed_hook_path()
+    installed_tokens = installed_tokens_path()
+    codex_config = codex_config_path()
+
     remove_notify_config()
 
-    if INSTALLED_HOOK.exists() or INSTALLED_HOOK.is_symlink():
-        INSTALLED_HOOK.unlink()
-        print(f"훅을 제거했어요: {INSTALLED_HOOK}")
+    if installed_hook.exists() or installed_hook.is_symlink():
+        installed_hook.unlink()
+        print(f"훅을 제거했어요: {installed_hook}")
 
-    if INSTALLED_TOKENS.exists() or INSTALLED_TOKENS.is_symlink():
-        INSTALLED_TOKENS.unlink()
-        print(f"토큰 파일을 제거했어요: {INSTALLED_TOKENS}")
+    if installed_tokens.exists() or installed_tokens.is_symlink():
+        installed_tokens.unlink()
+        print(f"토큰 파일을 제거했어요: {installed_tokens}")
 
-    print(f"설정 파일을 업데이트했어요: {CODEX_CONFIG}")
+    print(f"설정 파일을 업데이트했어요: {codex_config}")
+    logger.info("Removed hook artifacts under %s", codex_home())
     return 0
 
 
 def status() -> int:
-    config_text = CODEX_CONFIG.read_text(encoding="utf-8") if CODEX_CONFIG.exists() else ""
+    codex_config = codex_config_path()
+    installed_hook = installed_hook_path()
+    installed_tokens = installed_tokens_path()
+
+    config_text = codex_config.read_text(encoding="utf-8") if codex_config.exists() else ""
     network_state = network_access_state(config_text)
     notify_configured = bool(re.search(r"(?m)^\s*notify\s*=.*$", config_text))
 
-    print(f"설정 파일: {CODEX_CONFIG} ({'존재함' if CODEX_CONFIG.exists() else '없음'})")
+    print(f"설정 파일: {codex_config} ({'존재함' if codex_config.exists() else '없음'})")
     print(f"알림 설정 여부: {'예' if notify_configured else '아니오'}")
     if network_state is True:
         print("샌드박스 network_access: true")
@@ -227,19 +295,19 @@ def status() -> int:
     else:
         print("샌드박스 network_access: 설정되지 않음")
 
-    if INSTALLED_HOOK.is_symlink():
-        print(f"훅 스크립트: {INSTALLED_HOOK} (심볼릭 링크)")
-    elif INSTALLED_HOOK.exists():
-        print(f"훅 스크립트: {INSTALLED_HOOK} (파일)")
+    if installed_hook.is_symlink():
+        print(f"훅 스크립트: {installed_hook} (심볼릭 링크)")
+    elif installed_hook.exists():
+        print(f"훅 스크립트: {installed_hook} (파일)")
     else:
-        print(f"훅 스크립트: {INSTALLED_HOOK} (없음)")
+        print(f"훅 스크립트: {installed_hook} (없음)")
 
-    if INSTALLED_TOKENS.is_symlink():
-        print(f"토큰 파일: {INSTALLED_TOKENS} (심볼릭 링크)")
-    elif INSTALLED_TOKENS.exists():
-        print(f"토큰 파일: {INSTALLED_TOKENS} (파일)")
+    if installed_tokens.is_symlink():
+        print(f"토큰 파일: {installed_tokens} (심볼릭 링크)")
+    elif installed_tokens.exists():
+        print(f"토큰 파일: {installed_tokens} (파일)")
     else:
-        print(f"토큰 파일: {INSTALLED_TOKENS} (없음)")
+        print(f"토큰 파일: {installed_tokens} (없음)")
 
     return 0
 
@@ -298,6 +366,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    configure_logging()
     args = parse_args(argv or sys.argv[1:])
 
     if args.command == "install-hook":
