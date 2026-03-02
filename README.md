@@ -1,13 +1,3 @@
-제공해주신 README 내용을 바탕으로, 기술적인 정확도는 유지하면서도 훨씬 읽기 매끄럽고 친절한 톤으로 다듬어 보았습니다.
-
----
-
-## 📝 한 줄 요약 (Description)
-
-> **"Codex가 열일하는 동안 커피 한 잔 하세요."** > OpenAI Codex CLI의 긴 작업이 끝나면 텔레그램으로 즉시 알림을 보내주는 똑똑한 훅(Hook) 도구입니다.
-
----
-
 # codex-notify 🔔
 
 **codex-notify**는 OpenAI Codex CLI 작업이 완료되었을 때 Telegram으로 알림을 보내주는 편리한 도구입니다.
