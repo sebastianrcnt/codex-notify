@@ -3,6 +3,10 @@ import logging
 from pathlib import Path
 
 import pytest
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover
+    import tomli as tomllib
 
 EXAMPLE_CODEX_CONFIG = """personality = \"pragmatic\"\nmodel = \"gpt-5.3-codex\"\nmodel_reasoning_effort = \"medium\"\n\n[projects.\"/Users/coolguy/dev/codex-notify\"]\ntrust_level = \"trusted\"\n\n[sandbox_workspace_write]\nnetwork_access = true\n"""
 
@@ -41,7 +45,7 @@ def test_codex_home_uses_env_override_and_logs(
 
 def test_notify_line_uses_overridden_home(app) -> None:
     line = app.notify_line()
-    assert line.startswith("notify = ['python3', '")
+    assert line.startswith('notify = ["python3", "')
     assert str(app.installed_hook_path()) in line
 
 
@@ -57,6 +61,25 @@ def test_set_notify_config_inserts_notify_at_root_top(app, isolated_codex_home: 
     assert first_line == app.notify_line()
     assert "[projects.\"/Users/coolguy/dev/codex-notify\"]" in updated
     assert "[sandbox_workspace_write]" in updated
+
+
+def test_set_notify_config_keeps_notify_at_root_before_first_section(app, isolated_codex_home: Path) -> None:
+    config = app.codex_config_path()
+    isolated_codex_home.mkdir(parents=True, exist_ok=True)
+    config.write_text(EXAMPLE_CODEX_CONFIG, encoding="utf-8")
+
+    app.set_notify_config()
+
+    updated = config.read_text(encoding="utf-8")
+    parsed = tomllib.loads(updated)
+    first_section_index = updated.find("[")
+    first_notify_index = updated.find("notify =")
+
+    assert "notify" in parsed
+    assert isinstance(parsed["notify"], list)
+    assert first_notify_index != -1
+    assert first_section_index != -1
+    assert first_notify_index < first_section_index
 
 
 def test_set_notify_config_replaces_root_notify_only(app, isolated_codex_home: Path) -> None:

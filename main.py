@@ -12,21 +12,18 @@ from __future__ import annotations
 import argparse
 import logging
 import os
-import re
 import shutil
 import sys
 from pathlib import Path
 from typing import Optional
+
+import tomlkit
 
 logger = logging.getLogger(__name__)
 _last_logged_codex_home: Optional[str] = None
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 SOURCE_HOOK = PROJECT_ROOT / "notify-hook.py"
-
-NETWORK_SECTION_HEADER = "[sandbox_workspace_write]"
-NETWORK_LINE = "network_access = true"
-
 
 def configure_logging() -> None:
     level_name = os.environ.get("CODEX_NOTIFY_LOG_LEVEL", "INFO").upper()
@@ -71,7 +68,23 @@ def notify_line() -> str:
         hook_path = "~/.codex/notify-hook.py"
     else:
         hook_path = target_hook.as_posix()
-    return f"notify = ['python3', '{hook_path}']"
+    return f'notify = ["python3", "{hook_path}"]'
+
+
+def notify_value() -> list[str]:
+    default_hook = Path.home() / ".codex" / "notify-hook.py"
+    target_hook = installed_hook_path()
+    if target_hook == default_hook:
+        hook_path = "~/.codex/notify-hook.py"
+    else:
+        hook_path = target_hook.as_posix()
+    return ["python3", hook_path]
+
+
+def parse_toml_document(text: str) -> tomlkit.TOMLDocument:
+    if not text.strip():
+        return tomlkit.document()
+    return tomlkit.parse(text)
 
 
 def confirm(question: str) -> bool:
@@ -89,22 +102,16 @@ def set_notify_config() -> None:
     else:
         text = ""
 
-    first_section = re.search(r"(?m)^\[", text)
-    root_end = first_section.start() if first_section else len(text)
-    root_part = text[:root_end]
-    section_part = text[root_end:]
+    doc = parse_toml_document(text)
+    if "notify" in doc:
+        del doc["notify"]
 
-    cleaned_root = re.sub(r"(?m)^\s*notify\s*=.*$\n?", "", root_part)
-    cleaned_root = cleaned_root.lstrip("\n")
-    root_suffix = cleaned_root if not cleaned_root or cleaned_root.startswith("\n") else f"\n{cleaned_root}"
-    section_suffix = (
-        section_part
-        if not section_part or section_part.startswith("\n")
-        else f"\n{section_part}"
-    )
-    updated = f"{notify_line()}{root_suffix}{section_suffix}"
-    if updated and not updated.endswith("\n"):
-        updated += "\n"
+    updated_doc = tomlkit.document()
+    updated_doc.add("notify", notify_value())
+    for key, value in doc.items():
+        updated_doc.add(key, value)
+
+    updated = tomlkit.dumps(updated_doc)
 
     codex_config.write_text(updated, encoding="utf-8")
     logger.info("Updated notify config in %s", codex_config)
@@ -116,51 +123,36 @@ def remove_notify_config() -> None:
         return
 
     text = codex_config.read_text(encoding="utf-8")
-    first_section = re.search(r"(?m)^\[", text)
-    root_end = first_section.start() if first_section else len(text)
-    root_part = text[:root_end]
-    section_part = text[root_end:]
-
-    cleaned_root = re.sub(r"(?m)^\s*notify\s*=.*$\n?", "", root_part)
-    updated = f"{cleaned_root}{section_part}"
+    doc = parse_toml_document(text)
+    if "notify" in doc:
+        del doc["notify"]
+    updated = tomlkit.dumps(doc)
     codex_config.write_text(updated, encoding="utf-8")
     logger.info("Removed notify config from %s", codex_config)
 
 
 def network_access_state(config_text: str) -> Optional[bool]:
-    section = re.search(
-        r"(?ms)^\[sandbox_workspace_write\]\s*\n(.*?)(?=^\[|\Z)", config_text
-    )
-    if not section:
+    doc = parse_toml_document(config_text)
+    section = doc.get("sandbox_workspace_write")
+    if not isinstance(section, dict):
         return None
 
-    line = re.search(r"(?m)^\s*network_access\s*=\s*(true|false)\s*$", section.group(1))
-    if not line:
+    value = section.get("network_access")
+    if not isinstance(value, bool):
         return None
-    return line.group(1) == "true"
+    return value
 
 
 def set_network_access_true(config_text: str) -> str:
-    section = re.search(
-        r"(?ms)^(\[sandbox_workspace_write\]\s*\n)(.*?)(?=^\[|\Z)", config_text
-    )
-    if not section:
-        suffix = "" if not config_text or config_text.endswith("\n") else "\n"
-        return f"{config_text}{suffix}{NETWORK_SECTION_HEADER}\n{NETWORK_LINE}\n"
-
-    header, body = section.group(1), section.group(2)
-    if re.search(r"(?m)^\s*network_access\s*=\s*(true|false)\s*$", body):
-        new_body = re.sub(
-            r"(?m)^\s*network_access\s*=\s*(true|false)\s*$",
-            NETWORK_LINE,
-            body,
-            count=1,
-        )
+    doc = parse_toml_document(config_text)
+    section = doc.get("sandbox_workspace_write")
+    if isinstance(section, dict):
+        section["network_access"] = True
     else:
-        separator = "" if not body or body.endswith("\n") else "\n"
-        new_body = f"{body}{separator}{NETWORK_LINE}\n"
-
-    return f"{config_text[:section.start()]}{header}{new_body}{config_text[section.end():]}"
+        table = tomlkit.table()
+        table.add("network_access", True)
+        doc.add("sandbox_workspace_write", table)
+    return tomlkit.dumps(doc)
 
 
 def ensure_network_access_enabled() -> bool:
@@ -284,7 +276,8 @@ def status() -> int:
 
     config_text = codex_config.read_text(encoding="utf-8") if codex_config.exists() else ""
     network_state = network_access_state(config_text)
-    notify_configured = bool(re.search(r"(?m)^\s*notify\s*=.*$", config_text))
+    doc = parse_toml_document(config_text)
+    notify_configured = isinstance(doc.get("notify"), list)
 
     print(f"설정 파일: {codex_config} ({'존재함' if codex_config.exists() else '없음'})")
     print(f"알림 설정 여부: {'예' if notify_configured else '아니오'}")
