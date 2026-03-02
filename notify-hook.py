@@ -15,11 +15,15 @@ Tokens file (~/.codex/notify-hook-tokens.toml):
 import json
 import sys
 import time
-import tomllib
 import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Dict, Tuple
+
+try:
+    import tomllib
+except ImportError:  # Python < 3.11
+    import tomli as tomllib
 
 # ── paths ────────────────────────────────────────────────────────────
 CODEX_HOME = Path.home() / ".codex"

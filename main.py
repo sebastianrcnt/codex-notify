@@ -14,6 +14,7 @@ import re
 import shutil
 import sys
 from pathlib import Path
+from typing import Optional
 
 CODEX_HOME = Path.home() / ".codex"
 CODEX_CONFIG = CODEX_HOME / "config.toml"
@@ -59,7 +60,7 @@ def remove_notify_config() -> None:
     CODEX_CONFIG.write_text(updated, encoding="utf-8")
 
 
-def network_access_state(config_text: str) -> bool | None:
+def network_access_state(config_text: str) -> Optional[bool]:
     section = re.search(
         r"(?ms)^\[sandbox_workspace_write\]\s*\n(.*?)(?=^\[|\Z)", config_text
     )
@@ -279,7 +280,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     args = parse_args(argv or sys.argv[1:])
 
     if args.command == "install-hook":
