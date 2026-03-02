@@ -28,7 +28,6 @@ LOG_FILE = CODEX_HOME / "log" / "notify.log"
 
 # Telegram hard limit: 4096 chars
 MAX_LEN = 4000  # leave a small buffer
-MESSAGE_SEPARATOR = "------------------------------"
 
 
 # ── logging ──────────────────────────────────────────────────────────
@@ -105,10 +104,7 @@ def format_message(p: Dict[str, Any]) -> str:
         summary = truncate(summary, 3000)
 
         lines = [
-            f"✅  *Codex done*  —  `{project}`",
-            MESSAGE_SEPARATOR,
-            "",
-            f"📌  {_escape_md(title_line)}",
+            f"# {project}: {_escape_md(title_line)}",
             "",
             _escape_md(summary),
         ]
@@ -116,10 +112,7 @@ def format_message(p: Dict[str, Any]) -> str:
 
     # ── fallback for unknown event types ─────────────────────────
     raw = json.dumps(p, ensure_ascii=False, indent=2)
-    return truncate(
-        f"🔔 Codex event: `{event_type}`\n{MESSAGE_SEPARATOR}\n\n```\n{raw}\n```",
-        MAX_LEN,
-    )
+    return truncate(f"🔔 Codex event: `{event_type}`\n\n```\n{raw}\n```", MAX_LEN)
 
 
 def _clean_markdown(text: str) -> str:
