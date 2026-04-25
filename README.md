@@ -1,119 +1,188 @@
-# codex-notify 🔔
+# codex-notify
 
-Codex CLI의 `notify` 이벤트를 받아 Telegram으로 완료 알림만 전달하는 가벼운 일회성 훅입니다.
-Codex CLI → Telegram으로 **단방향**으로만 동작하며, Telegram에서 Codex를 제어하거나 상태 조회를 요청할 수 없습니다.
+`codex-notify`는 Codex CLI의 `notify` 이벤트를 Telegram으로 전달하는 **단방향 알림 도구**입니다.
+
+이 프로젝트의 범위:
+- Codex CLI notify 이벤트 → Telegram 메시지 전송
+
+이 프로젝트의 범위가 아닌 것:
+- Telegram에서 Codex를 원격 조종하는 양방향 브릿지
+- Telegram polling/webhook 서버
 
 ## 목차
 
 1. [소개](#소개)
-2. [설치](#설치)
-3. [빠른 시작](#빠른-시작)
-4. [명령어](#명령어)
-5. [보안](#보안)
-6. [진단/상태 확인](#진단상태-확인)
-7. [문제 해결](#문제-해결)
-8. [주의사항](#주의사항)
+2. [요구사항](#요구사항)
+3. [설치](#설치)
+4. [업데이트](#업데이트)
+5. [빠른 시작](#빠른-시작)
+6. [명령어](#명령어)
+7. [보안 원칙](#보안-원칙)
+8. [진단](#진단)
+9. [문제 해결](#문제-해결)
+10. [제거](#제거)
 
 ## 소개
 
-- 이것이 맞는 용도입니다:  
-  Codex CLI 작업 완료 이벤트를 받아 Telegram 알림을 보내는 기능
-- 이것이 아닌 용도입니다:  
-  Telegram으로 Codex를 원격 제어하거나 상태를 조회하는 브릿지 동작
+- Codex 작업 완료/이벤트를 Telegram으로 짧게 알림합니다.
+- 기본 메시지는 보수적으로 요약해서 전송합니다.
+- 긴 본문은 opt-in일 때만 전송합니다.
+
+## 요구사항
+
+- Python 3.9+
+- Codex CLI
+- Telegram bot token
+- Telegram chat id
 
 ## 설치
 
-### 필수 조건
+권장:
 
-- Python 3.9 이상
-- OpenAI Codex CLI 설치
-- Telegram Bot 토큰
-- 대상 채팅/채널 chat_id
+```bash
+uv tool install git+https://github.com/sebastianrcnt/codex-notify
+```
 
-### 권장 설치
+대안:
 
 ```bash
 pipx install git+https://github.com/sebastianrcnt/codex-notify
 ```
 
-pipx가 없다면 `pipx`를 먼저 설치하세요.
+임시 실행:
 
-## 빠른 시작
+```bash
+uvx --from git+https://github.com/sebastianrcnt/codex-notify codex-notify --help
+```
 
-1. BotFather로 봇 생성 후 토큰 획득
-2. 본인 채팅 또는 그룹의 `chat_id` 획득
-3. 설치 실행
+설치 후:
 
 ```bash
 codex-notify install
+codex-notify test
+codex-notify doctor
 ```
 
-4. 저장된 설정으로 테스트 전송
+## 업데이트
+
+`codex-notify` 업데이트는 두 단계입니다.
+1) 도구 버전 업데이트
+2) 로컬 안정 경로(`~/.codex/notify-hook.py`)로 hook 갱신
+
+### uv 사용자
 
 ```bash
+uv tool upgrade codex-notify
+codex-notify update
+codex-notify test
+codex-notify doctor
+```
+
+GitHub URL 설치에서 `upgrade`가 애매하면:
+
+```bash
+uv tool install --force git+https://github.com/sebastianrcnt/codex-notify
+codex-notify update
+```
+
+### pipx 사용자
+
+```bash
+pipx upgrade codex-notify
+codex-notify update
 codex-notify test
 ```
 
-5. 상태와 진단 점검
+GitHub URL 설치에서 `upgrade`가 동작하지 않으면:
 
 ```bash
-codex-notify status
-codex-notify doctor --no-network
+pipx install --force git+https://github.com/sebastianrcnt/codex-notify
+codex-notify update
 ```
+
+주의:
+- `uvx`는 임시/캐시 환경일 수 있습니다.
+- Codex notify 설정은 `uvx`/`pipx` 내부 경로를 직접 가리키지 않고, 항상 `~/.codex/notify-hook.py`를 가리키도록 유지해야 합니다.
+
+## 빠른 시작
+
+1. `@BotFather`로 봇 생성 후 token 발급
+2. 알림 받을 chat id 확인
+3. `codex-notify install`
+4. `codex-notify test`
+5. `codex-notify doctor --no-network`
 
 ## 명령어
 
-- `codex-notify`  
-  인자가 없으면 대화형 설치(온보딩)를 실행합니다.
-- `codex-notify install`  
-  훅 파일과 토큰 파일을 설치합니다. 기존 토큰을 덮어쓸지 묻습니다.
-- `codex-notify uninstall`  
-  설치된 훅을 제거합니다. 토큰 파일은 기본적으로 유지합니다.
-- `codex-notify status`  
-  설치 경로, 훅 파일 존재 여부, 권한 상태를 출력합니다.
-- `codex-notify test`  
-  Codex 이벤트 없이 현재 토큰/채팅 설정으로 테스트 메시지를 전송합니다.
-- `codex-notify doctor`  
-  Python 버전, 설정 경로, 훅/토큰 존재 여부, 권한 상태를 점검하고 네트워크가 허용되면 테스트 메시지를 한 번 전송합니다.
-  `--no-network`를 사용하면 전송을 건너뜁니다.
-- `codex-notify configure-network --enable|--disable`  
-  `~/.codex/config.toml`의 `network_access`를 명시적으로 제어합니다.
-- `codex-notify install-hook` (alias)  
-  `install`의 별칭
-- `codex-notify remove-hook` (alias)  
-  `uninstall`의 별칭
-
-## 보안
-
-- 토큰 저장 위치: `~/.codex/notify-hook-tokens.toml`
-- 토큰 파일 권한: 설치 시 `0600` 권장/설정
-- 메시지 기본 모드는 **짧고 보수적**입니다.
-- 기본 메시지는 `마크다운` 파싱을 사용하지 않습니다.
-- 긴 본문 전체를 기본으로 포함하지 않으며, `CODEX_NOTIFY_INCLUDE_BODY=1` 또는 토큰 파일의 `[telegram].include_body = true`를 설정할 때만 본문 상세를 포함합니다.
-- 알림 전송 전/후 로그는 토큰을 마스킹하고, 로컬 디버그용으로만 보존합니다.
-- `network_access`는 기본으로 자동 활성화하지 않습니다. 필요 시 `configure-network --enable`로 명시적으로 설정하세요.
-
-## 진단/상태 확인
-
-- `codex-notify status`
-  - `~/.codex/config.toml` 경로
-  - 훅/토큰 파일 경로 및 존재 여부
-  - 훅 실행/읽기 권한
-  - `network_access` 상태
+- `codex-notify install`
+  - hook/config 설치
+  - 기존 `~/.codex/notify-hook-tokens.toml`이 있으면 보존
+- `codex-notify update`
+  - 패키지에 포함된 최신 `notify-hook.py`를 `~/.codex/notify-hook.py`로 갱신
+  - `~/.codex/config.toml`의 `notify`를 안정 경로로 정리
+  - credential은 변경하지 않음
+- `codex-notify reconfigure`
+  - Telegram token/chat_id만 재설정
+- `codex-notify uninstall`
+  - hook/config 제거
+  - credential은 기본 유지
+  - `--delete-credentials`를 주면 credential도 삭제
+- `codex-notify test`
+  - 현재 credential로 Telegram 테스트 메시지 전송
 - `codex-notify doctor`
-  - 위 항목 + Telegram 테스트 전송(또는 `--no-network` 건너뜀)
-  - 토큰/설정 값은 출력하지 않습니다.
+  - 진단 전체 실행
+  - `--no-network`로 Telegram 네트워크 테스트 생략
+- `codex-notify status`
+  - 설치 상태/경로/권한 요약
+- `codex-notify configure-network --enable|--disable`
+  - `~/.codex/config.toml`의 `network_access`를 명시적으로 변경
+- alias
+  - `codex-notify install-hook` → `install`
+  - `codex-notify remove-hook` → `uninstall`
+
+## 보안 원칙
+
+- credential 파일: `~/.codex/notify-hook-tokens.toml`
+- credential 파일 권한: `0600` 권장 및 자동 보정 시도
+- `~/.codex` 디렉터리 권한: `0700` 권장 및 자동 보정 시도
+- `install`/`update`는 credential을 기본적으로 덮어쓰지 않음
+- credential 변경은 `reconfigure`에서만
+- `status`/`doctor`/로그에 token/chat_id 원문 노출 금지
+- 메시지 전송 전 민감 패턴(`sk-`, `ghp_`, `github_pat_`, `xoxb-`, `TOKEN=`, `SECRET=`, `PASSWORD=`, `API_KEY=` 등) 마스킹
+- `network_access=true`는 자동으로 켜지지 않음
+
+## 진단
+
+`codex-notify doctor`는 다음을 확인합니다.
+- Python version
+- Codex config 존재 여부
+- notify hook 설치 여부
+- hook 파일 존재/권한
+- token 파일 존재/권한
+- token 로드 가능 여부(마스킹 출력)
+- Telegram 테스트 가능 여부 (`--no-network` 제외 시)
+- `network_access` 현재 상태
+- 로그 파일 위치
 
 ## 문제 해결
 
-- 봇이 채널에 먼저 메시지를 보내지 못해 실패: 먼저 봇에게 채팅을 보내두세요.
-- `token file permissions are too open` 경고가 뜨면 `chmod 600 ~/.codex/notify-hook-tokens.toml` 실행
-- Telegram 전송이 안 되면 `codex-notify doctor`에서 네트워크 상태 확인
-- `network_access`가 false라면 필요 시 `codex-notify configure-network --enable`
-- `notify`가 Codex 실행마다 호출되지 않으면 `status`/`doctor`로 훅 경로를 점검하고 Codex 설정을 확인하세요.
-- 로그 파일: `~/.codex/log/notify.log`
+- Telegram 실패 시:
+  - token/chat_id 오입력 여부 확인 (`codex-notify reconfigure`)
+  - 봇에 먼저 메시지를 보내야 하는지 확인
+  - 네트워크 차단 여부 확인 (`codex-notify doctor`)
+- `network_access`가 `false`/`unset`이면 필요 시:
+  - `codex-notify configure-network --enable`
+- 로그 확인:
+  - `~/.codex/log/notify.log`
 
-## 주의사항
+## 제거
 
-- 이 도구는 Telegram polling/webhook 서버나 Telegram로부터의 명령 수신을 구현하지 않습니다.
-- 설치한 토큰/채팅 정보는 Codex 훅 실행 시점에만 읽히고, 훅 파일 자체에는 임베드하지 않습니다.
+```bash
+codex-notify uninstall
+```
+
+credential도 함께 삭제하려면:
+
+```bash
+codex-notify uninstall --delete-credentials
+```
