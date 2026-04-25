@@ -1,145 +1,119 @@
 # codex-notify 🔔
 
-**codex-notify**는 OpenAI Codex CLI 작업이 완료되었을 때 Telegram으로 알림을 보내주는 편리한 도구입니다.
+Codex CLI의 `notify` 이벤트를 받아 Telegram으로 완료 알림만 전달하는 가벼운 일회성 훅입니다.
+Codex CLI → Telegram으로 **단방향**으로만 동작하며, Telegram에서 Codex를 제어하거나 상태 조회를 요청할 수 없습니다.
 
-Codex가 복잡한 코드를 생성하거나 긴 작업을 처리하는 동안 화면만 바라보고 계셨나요? 이제는 다른 업무를 보셔도 됩니다. 작업이 끝나는 순간, 텔레그램이 여러분께 완료 소식을 바로 알려드립니다.
+## 목차
 
----
+1. [소개](#소개)
+2. [설치](#설치)
+3. [빠른 시작](#빠른-시작)
+4. [명령어](#명령어)
+5. [보안](#보안)
+6. [진단/상태 확인](#진단상태-확인)
+7. [문제 해결](#문제-해결)
+8. [주의사항](#주의사항)
 
-## 📑 목차
+## 소개
 
-1. [요구사항](https://www.google.com/search?q=%23%EC%9A%94%EA%B5%AC%EC%82%AC%ED%95%AD)
-2. [설치 방법](https://www.google.com/search?q=%23%EC%84%A4%EC%B9%98-%EB%B0%A9%EB%B2%95)
-3. [사전 준비: Telegram 봇 만들기](https://www.google.com/search?q=%23%EC%82%AC%EC%A0%84-%EC%A4%80%EB%B9%84-telegram-%EB%B4%87-%EB%A7%8C%EB%93%A4%EA%B8%B0)
-4. [사용법](https://www.google.com/search?q=%23%EC%82%AC%EC%9A%A9%EB%B2%95)
-5. [동작 원리](https://www.google.com/search?q=%23%EB%8F%99%EC%9E%91-%EC%9B%90%EB%A6%AC)
-6. [설정 파일 및 로그](https://www.google.com/search?q=%23%EC%84%A4%EC%A0%95-%ED%8C%8C%EC%9D%BC-%EB%B0%8F-%EB%A1%9C%EA%B7%B8)
-7. [문제 해결](https://www.google.com/search?q=%23%EB%AC%B8%EC%A0%9C-%ED%95%B4%EA%B2%B0)
+- 이것이 맞는 용도입니다:  
+  Codex CLI 작업 완료 이벤트를 받아 Telegram 알림을 보내는 기능
+- 이것이 아닌 용도입니다:  
+  Telegram으로 Codex를 원격 제어하거나 상태를 조회하는 브릿지 동작
 
----
+## 설치
 
-## 🛠 요구사항
+### 필수 조건
 
-시작하기 전에 아래 환경이 갖춰져 있는지 확인해 주세요.
+- Python 3.9 이상
+- OpenAI Codex CLI 설치
+- Telegram Bot 토큰
+- 대상 채팅/채널 chat_id
 
-* **Python:** 3.9.2 버전 이상
-* **OpenAI Codex CLI:** 설치 및 기본 설정 완료 ([공식 저장소](https://github.com/openai/codex))
-* **Telegram:** 알림을 받을 계정과 봇
-
----
-
-## 🚀 설치 방법
-
-현재 GitHub을 통해 직접 설치하실 수 있습니다.
-
-**pip로 설치하기:**
-
-```bash
-pip install git+https://github.com/sebastianrcnt/codex-notify
-
-```
-
-**pipx로 설치하기 (권장):**
-
-> 전역 CLI 도구로 관리하기 편리하며 의존성 충돌을 방지합니다.
+### 권장 설치
 
 ```bash
 pipx install git+https://github.com/sebastianrcnt/codex-notify
-
 ```
 
-설치가 완료되면 터미널에서 `codex-notify --help`를 입력해 정상 작동 여부를 확인해 보세요.
+pipx가 없다면 `pipx`를 먼저 설치하세요.
 
----
+## 빠른 시작
 
-## 🤖 사전 준비: Telegram 봇 만들기
-
-알림을 보내줄 '비서 봇'을 먼저 만들어야 합니다.
-
-### 1. 봇 토큰 발급받기
-
-1. 텔레그램에서 **[@BotFather](https://t.me/BotFather)**를 찾아 대화를 시작합니다.
-2. `/newbot`을 입력하고 안내에 따라 봇 이름과 사용자명(Username)을 정합니다.
-3. 생성이 완료되면 `123456789:ABC...` 형태의 **API 토큰**이 발급됩니다. 이 토큰은 외부에 노출되지 않게 잘 보관해 주세요.
-
-### 2. 내 Chat ID 확인하기
-
-봇이 나를 찾을 수 있도록 고유 ID가 필요합니다.
-
-1. **[@userinfobot](https://t.me/userinfobot)**에 접속해 `/start`를 보냅니다.
-2. 응답으로 오는 `Id` 항목의 숫자(예: `987654321`)를 메모해 두세요.
-
----
-
-## 💡 사용법
-
-### 1. 온보딩 (간편 설정)
-
-가장 쉬운 방법입니다. 터미널에 아래 명령어를 입력하면 대화형 가이드가 시작됩니다.
+1. BotFather로 봇 생성 후 토큰 획득
+2. 본인 채팅 또는 그룹의 `chat_id` 획득
+3. 설치 실행
 
 ```bash
-codex-notify
-
+codex-notify install
 ```
 
-가이드에 따라 **네트워크 접근 허용, 봇 토큰, Chat ID**를 차례로 입력하면 모든 설정이 끝납니다.
-
-### 2. 수동 훅 설치
-
-가이드 없이 바로 설치하고 싶다면 다음 명령어를 사용하세요.
+4. 저장된 설정으로 테스트 전송
 
 ```bash
-codex-notify install-hook
-
+codex-notify test
 ```
 
-* **팁:** 기존에 설정한 토큰 정보를 유지하고 싶다면 `--no-overwrite` 옵션을 추가하세요.
+5. 상태와 진단 점검
 
-### 3. 상태 및 제거
+```bash
+codex-notify status
+codex-notify doctor --no-network
+```
 
-* **설정 확인:** `codex-notify status` (현재 설치 상태와 경로를 한눈에 보여줍니다.)
-* **훅 제거:** `codex-notify remove-hook` (설정된 훅과 관련 파일을 깔끔하게 삭제합니다.)
+## 명령어
 
----
+- `codex-notify`  
+  인자가 없으면 대화형 설치(온보딩)를 실행합니다.
+- `codex-notify install`  
+  훅 파일과 토큰 파일을 설치합니다. 기존 토큰을 덮어쓸지 묻습니다.
+- `codex-notify uninstall`  
+  설치된 훅을 제거합니다. 토큰 파일은 기본적으로 유지합니다.
+- `codex-notify status`  
+  설치 경로, 훅 파일 존재 여부, 권한 상태를 출력합니다.
+- `codex-notify test`  
+  Codex 이벤트 없이 현재 토큰/채팅 설정으로 테스트 메시지를 전송합니다.
+- `codex-notify doctor`  
+  Python 버전, 설정 경로, 훅/토큰 존재 여부, 권한 상태를 점검하고 네트워크가 허용되면 테스트 메시지를 한 번 전송합니다.
+  `--no-network`를 사용하면 전송을 건너뜁니다.
+- `codex-notify configure-network --enable|--disable`  
+  `~/.codex/config.toml`의 `network_access`를 명시적으로 제어합니다.
+- `codex-notify install-hook` (alias)  
+  `install`의 별칭
+- `codex-notify remove-hook` (alias)  
+  `uninstall`의 별칭
 
-## ⚙️ 동작 방식
+## 보안
 
-작동 과정은 아주 심플합니다.
+- 토큰 저장 위치: `~/.codex/notify-hook-tokens.toml`
+- 토큰 파일 권한: 설치 시 `0600` 권장/설정
+- 메시지 기본 모드는 **짧고 보수적**입니다.
+- 기본 메시지는 `마크다운` 파싱을 사용하지 않습니다.
+- 긴 본문 전체를 기본으로 포함하지 않으며, `CODEX_NOTIFY_INCLUDE_BODY=1` 또는 토큰 파일의 `[telegram].include_body = true`를 설정할 때만 본문 상세를 포함합니다.
+- 알림 전송 전/후 로그는 토큰을 마스킹하고, 로컬 디버그용으로만 보존합니다.
+- `network_access`는 기본으로 자동 활성화하지 않습니다. 필요 시 `configure-network --enable`로 명시적으로 설정하세요.
 
-1. **Codex CLI 작업 완료:** 작업이 끝나는 순간 Codex가 이벤트를 발생시킵니다.
-2. **훅 실행:** 설정된 `notify-hook.py`가 실행되며 이벤트 데이터를 읽습니다.
-3. **알림 전송:** 저장된 토큰을 이용해 텔레그램 API를 호출, 사용자에게 메시지를 보냅니다.
+## 진단/상태 확인
 
-**알림 메시지에는 이런 정보가 담겨요:**
+- `codex-notify status`
+  - `~/.codex/config.toml` 경로
+  - 훅/토큰 파일 경로 및 존재 여부
+  - 훅 실행/읽기 권한
+  - `network_access` 상태
+- `codex-notify doctor`
+  - 위 항목 + Telegram 테스트 전송(또는 `--no-network` 건너뜀)
+  - 토큰/설정 값은 출력하지 않습니다.
 
-* 작업 요약 (응답 첫 줄)
-* 작업이 수행된 폴더 위치 (`folder:`)
-* 사용 중인 호스트명 (`host:`) 및 세션 ID (`sid:`)
+## 문제 해결
 
----
+- 봇이 채널에 먼저 메시지를 보내지 못해 실패: 먼저 봇에게 채팅을 보내두세요.
+- `token file permissions are too open` 경고가 뜨면 `chmod 600 ~/.codex/notify-hook-tokens.toml` 실행
+- Telegram 전송이 안 되면 `codex-notify doctor`에서 네트워크 상태 확인
+- `network_access`가 false라면 필요 시 `codex-notify configure-network --enable`
+- `notify`가 Codex 실행마다 호출되지 않으면 `status`/`doctor`로 훅 경로를 점검하고 Codex 설정을 확인하세요.
+- 로그 파일: `~/.codex/log/notify.log`
 
-## 📂 설정 파일 및 로그
+## 주의사항
 
-모든 설정은 `~/.codex/` 폴더 내에서 관리됩니다.
-
-* `config.toml`: Codex CLI의 메인 설정 파일 (네트워크 및 훅 경로 포함)
-* `notify-hook-tokens.toml`: 여러분의 텔레그램 봇 토큰과 ID가 담긴 파일
-* `log/notify.log`: 알림이 안 올 때 원인을 파악할 수 있는 일기장입니다.
-
----
-
-## ❓ 문제 해결 (FAQ)
-
-**Q. 알림이 오지 않아요!**
-
-* `codex-notify status`를 입력해 모든 파일이 `exists` 상태인지 확인해 보세요.
-* 텔레그램 봇에게 **먼저 메시지**를 보냈는지 확인해 주세요. (봇은 먼저 말을 걸 수 없습니다.)
-* `~/.codex/log/notify.log` 파일을 열어 에러 메시지가 있는지 살펴봐 주세요.
-
-**Q. 네트워크 관련 오류가 떠요.**
-
-* Codex 샌드박스 설정에서 외부 통신이 차단되어 있을 수 있습니다. `~/.codex/config.toml`에 `network_access = true`가 제대로 들어있는지 확인해 보세요.
-
----
-
-**더 궁금한 점이 있거나 도움이 필요하신가요? 언제든 물어봐 주세요!**
+- 이 도구는 Telegram polling/webhook 서버나 Telegram로부터의 명령 수신을 구현하지 않습니다.
+- 설치한 토큰/채팅 정보는 Codex 훅 실행 시점에만 읽히고, 훅 파일 자체에는 임베드하지 않습니다.
