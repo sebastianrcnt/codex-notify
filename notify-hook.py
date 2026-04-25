@@ -133,7 +133,10 @@ def load_tokens(path: Optional[Path] = None) -> Dict[str, Any]:
     if not token or not chat_id:
         raise ValueError(f"Missing telegram.token/chat_id in {token_path}")
 
-    include_body = bool(telegram.get("include_body", False) or _bool_from_env("CODEX_NOTIFY_INCLUDE_BODY"))
+    if "include_body" in telegram:
+        include_body = bool(telegram.get("include_body"))
+    else:
+        include_body = True
     style = str(telegram.get("style", "pretty") or "pretty").strip().lower()
     if style not in {"plain", "compact", "pretty"}:
         style = "pretty"
@@ -207,22 +210,6 @@ def _first_nonempty_line(text: str) -> str:
         if line:
             return line
     return ""
-
-
-def _remaining_body(text: str) -> str:
-    lines = text.splitlines()
-    if not lines:
-        return ""
-
-    first_seen = False
-    rest: list[str] = []
-    for line in lines:
-        if not first_seen and line.strip():
-            first_seen = True
-            continue
-        if first_seen:
-            rest.append(line)
-    return "\n".join(rest).strip()
 
 
 def _clean_summary(payload: Dict[str, Any], include_body: bool) -> str:
@@ -311,9 +298,7 @@ def _message_context(payload: Dict[str, Any], include: bool) -> Dict[str, str]:
     raw_title = _first_nonempty_line(summary) or status_line or "Codex notification"
     title = _shorten(raw_title.replace("\n", " "), 240)
     request = _request_excerpt(payload, include)
-    body = _remaining_body(summary) if include else ""
-    if include and not body and len(raw_title) > 240:
-        body = raw_title[240:].strip()
+    body = summary if include else ""
 
     return {
         "event": event_type,
@@ -333,10 +318,10 @@ def _format_plain_message(ctx: Dict[str, str], *, include_body: bool, show_debug
     lines = [
         f"{_event_icon(ctx['event'])} {ctx['title']}",
     ]
+    if ctx["request"]:
+        lines.extend(["", "📝 요청", ctx["request"]])
     if include_body and ctx["body"]:
         lines.extend(["", ctx["body"]])
-    if ctx["request"]:
-        lines.extend(["", "요청", ctx["request"]])
 
     lines.extend(["", f"📁 {ctx['folder']} · 🖥 {ctx['host']} · 🧵 {ctx['session']}"])
 
@@ -361,10 +346,10 @@ def _format_pretty_message(ctx: Dict[str, str], *, include_body: bool, show_debu
     lines = [
         f"{_event_icon(ctx['event'])} <b>{_h(ctx['title'])}</b>",
     ]
+    if ctx["request"]:
+        lines.extend(["", "📝 <b>요청</b>", _h(ctx["request"])])
     if include_body and ctx["body"]:
         lines.extend(["", _h(ctx["body"])])
-    if ctx["request"]:
-        lines.extend(["", "<b>요청</b>", _h(ctx["request"])])
 
     lines.extend([
         "",
@@ -393,9 +378,7 @@ def format_message(
     style: str = "pretty",
     show_debug: bool = True,
 ) -> str:
-    include = bool(include_body)
-    if include_body is None:
-        include = _bool_from_env("CODEX_NOTIFY_INCLUDE_BODY")
+    include = True if include_body is None else bool(include_body)
 
     ctx = _message_context(payload, include)
     normalized_style = (style or "pretty").strip().lower()
