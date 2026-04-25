@@ -308,9 +308,12 @@ def _message_context(payload: Dict[str, Any], include: bool) -> Dict[str, str]:
     host = _safe_text(payload.get("hostname") or payload.get("host") or socket.gethostname())
     session = _session_short(payload)
     summary = _clean_summary(payload, include)
-    title = _first_nonempty_line(summary) or status_line or "Codex notification"
+    raw_title = _first_nonempty_line(summary) or status_line or "Codex notification"
+    title = _shorten(raw_title.replace("\n", " "), 240)
     request = _request_excerpt(payload, include)
     body = _remaining_body(summary) if include else ""
+    if include and not body and len(raw_title) > 240:
+        body = raw_title[240:].strip()
 
     return {
         "event": event_type,
@@ -319,7 +322,7 @@ def _message_context(payload: Dict[str, Any], include: bool) -> Dict[str, str]:
         "host": host,
         "session": session,
         "summary": summary,
-        "title": _shorten(title.replace("\n", " "), 240),
+        "title": title,
         "body": _shorten(body, 2200),
         "request": request,
         "client": _safe_text(payload.get("client")),
