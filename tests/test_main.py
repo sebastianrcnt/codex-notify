@@ -211,6 +211,94 @@ def test_status_and_doctor_do_not_leak_tokens(app, monkeypatch: pytest.MonkeyPat
     assert "123456...ABCD" in output
 
 
+def test_status_reports_hook_up_to_date_when_contents_match(
+    app, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = app.codex_home() / "source-notify-hook.py"
+    source.write_text("print('same')\n", encoding="utf-8")
+    monkeypatch.setattr(app, "SOURCE_HOOK", source)
+
+    hook = app.installed_hook_path()
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    hook.write_text("print('same')\n", encoding="utf-8")
+
+    app.status()
+    output = capsys.readouterr().out
+    assert "Hook up to date: yes" in output
+
+    app.doctor(no_network=True)
+    output = capsys.readouterr().out
+    assert "Hook up to date: yes" in output
+
+
+def test_status_reports_stale_hook_warning(app, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    source = app.codex_home() / "source-notify-hook.py"
+    source.write_text("print('new')\n", encoding="utf-8")
+    monkeypatch.setattr(app, "SOURCE_HOOK", source)
+
+    hook = app.installed_hook_path()
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    hook.write_text("print('old')\n", encoding="utf-8")
+
+    app.status()
+    output = capsys.readouterr().out
+    assert "Hook up to date: no" in output
+    assert "Warning: installed Codex hook is stale." in output
+    assert "Run: codex-notify update" in output
+
+    app.doctor(no_network=True)
+    output = capsys.readouterr().out
+    assert "Hook up to date: no" in output
+    assert "Warning: installed Codex hook is stale." in output
+
+
+def test_status_reports_symlink_target_and_real_path(
+    app, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = app.codex_home() / "source-notify-hook.py"
+    source.write_text("print('same')\n", encoding="utf-8")
+    monkeypatch.setattr(app, "SOURCE_HOOK", source)
+
+    hook = app.installed_hook_path()
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    real_target = hook.parent / "real-hook.py"
+    real_target.write_text("print('same')\n", encoding="utf-8")
+    hook.symlink_to(real_target)
+
+    app.status()
+    output = capsys.readouterr().out
+    assert "Hook symlink: yes" in output
+    assert f"Hook symlink target: {real_target}" in output
+    assert f"Hook real path: {real_target}" in output
+    assert "Hook up to date: yes" in output
+
+
+def test_test_command_warns_on_stale_hook_but_still_sends(
+    app, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = app.codex_home() / "source-notify-hook.py"
+    source.write_text("print('new')\n", encoding="utf-8")
+    monkeypatch.setattr(app, "SOURCE_HOOK", source)
+
+    hook = app.installed_hook_path()
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    hook.write_text("print('old')\n", encoding="utf-8")
+
+    token_file = app.installed_tokens_path()
+    token_file.write_text("driver='telegram'\n[telegram]\ntoken='tok'\nchat_id='1'\n", encoding="utf-8")
+
+    fake_module = type("Hook", (), {"send_notification": lambda *args, **kwargs: None})
+    monkeypatch.setattr(app, "_load_hook_module", lambda: fake_module())
+
+    rc = app.test_command()
+    output = capsys.readouterr().out
+
+    assert rc == 0
+    assert "Hook up to date: no" in output
+    assert "Warning: installed Codex hook is stale." in output
+    assert "Telegram test send succeeded" in output
+
+
 def test_token_permission_safety_function(app) -> None:
     token = app.installed_tokens_path()
     token.parent.mkdir(parents=True, exist_ok=True)

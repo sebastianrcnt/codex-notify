@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import logging
 import os
@@ -116,6 +117,17 @@ def _read_file(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _sha256_digest(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fileobj:
+        while True:
+            chunk = fileobj.read(8192)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _safe_prompt(message: str) -> str:
     value = input(message).strip()
     if not value:
@@ -154,6 +166,57 @@ def _load_token_config(tokens_path: Path) -> Optional[dict[str, Any]]:
         "token": str(telegram.get("token", "")).strip(),
         "chat_id": str(telegram.get("chat_id", "")).strip(),
     }
+
+
+def inspect_hook_status() -> dict[str, Any]:
+    hook = installed_hook_path()
+    packaged = SOURCE_HOOK
+    info: dict[str, Any] = {
+        "path": hook,
+        "exists": hook.exists(),
+        "is_symlink": hook.is_symlink(),
+        "symlink_target": None,
+        "resolved_path": None,
+        "readable": False,
+        "executable": False,
+        "mode": None,
+        "up_to_date": None,
+    }
+
+    if info["is_symlink"]:
+        try:
+            info["symlink_target"] = hook.readlink()
+        except OSError:
+            info["symlink_target"] = None
+
+    if not info["exists"]:
+        return info
+
+    resolved = hook.resolve()
+    info["resolved_path"] = resolved
+    info["readable"] = os.access(hook, os.R_OK)
+    info["executable"] = os.access(hook, os.X_OK)
+    info["mode"] = _format_mode(hook)
+
+    try:
+        info["up_to_date"] = _sha256_digest(packaged) == _sha256_digest(resolved)
+    except OSError:
+        info["up_to_date"] = None
+
+    return info
+
+
+def _print_hook_freshness(status: dict[str, Any]) -> None:
+    if not status["exists"]:
+        return
+    up_to_date = status["up_to_date"]
+    if up_to_date is None:
+        print("Hook up to date: unknown")
+        return
+    print(f"Hook up to date: {'yes' if up_to_date else 'no'}")
+    if not up_to_date:
+        print("Warning: installed Codex hook is stale.")
+        print("Run: codex-notify update")
 
 
 def _ensure_not_symlink(path: Path, *, interactive: bool, force: bool, prompt_action: str) -> None:
@@ -415,7 +478,8 @@ def remove_hook(*, force: bool = False, interactive: bool = True, delete_tokens:
 
 
 def status() -> int:
-    hook = installed_hook_path()
+    hook_status = inspect_hook_status()
+    hook = hook_status["path"]
     tokens = installed_tokens_path()
     log_path = codex_home() / "log" / "notify.log"
     config_path = codex_config_path()
@@ -424,14 +488,19 @@ def status() -> int:
     print("=== codex-notify status ===")
     print(f"CODEX_HOME: {codex_home()}")
     print(f"Config: {config_path} ({'exists' if config_path.exists() else 'missing'})")
-    print(f"Hook: {hook} ({'exists' if hook.exists() else 'missing'})")
+    print(f"Hook: {hook} ({'exists' if hook_status['exists'] else 'missing'})")
     print(f"Token file: {tokens} ({'exists' if tokens.exists() else 'missing'})")
     print(f"Log file: {log_path} ({'exists' if log_path.exists() else 'missing'})")
 
-    if hook.exists():
-        print(f"Hook readable: {'yes' if os.access(hook, os.R_OK) else 'no'}")
-        print(f"Hook executable: {'yes' if os.access(hook, os.X_OK) else 'no'}")
-        print(f"Hook mode: {_format_mode(hook)}")
+    if hook_status["exists"]:
+        print(f"Hook readable: {'yes' if hook_status['readable'] else 'no'}")
+        print(f"Hook executable: {'yes' if hook_status['executable'] else 'no'}")
+        print(f"Hook mode: {hook_status['mode']}")
+        print(f"Hook symlink: {'yes' if hook_status['is_symlink'] else 'no'}")
+        if hook_status["is_symlink"]:
+            print(f"Hook symlink target: {hook_status['symlink_target']}")
+            print(f"Hook real path: {hook_status['resolved_path']}")
+        _print_hook_freshness(hook_status)
 
     token_cfg = _load_token_config(tokens)
     if tokens.exists():
@@ -481,6 +550,9 @@ def test_command() -> int:
         print("credential 파일이 없습니다. install 또는 reconfigure를 먼저 실행하세요.")
         return 1
 
+    hook_status = inspect_hook_status()
+    _print_hook_freshness(hook_status)
+
     module = _load_hook_module()
     payload = {
         "type": "codex-notify-test",
@@ -494,6 +566,7 @@ def test_command() -> int:
 
 
 def doctor(*, no_network: bool = False, interactive: bool = True) -> int:
+    hook_status = inspect_hook_status()
     print("=== codex-notify doctor ===")
     print(f"Python version: {sys.version.split()[0]}")
     print(f"CODEX_HOME: {codex_home()}")
@@ -509,12 +582,17 @@ def doctor(*, no_network: bool = False, interactive: bool = True) -> int:
     network_state = network_access_state(config_text) if config_text else None
     print(f"network_access: {network_state if network_state is not None else 'unset'}")
 
-    hook = installed_hook_path()
+    hook = hook_status["path"]
     print(f"Hook path: {hook}")
-    print(f"Hook exists: {'yes' if hook.exists() else 'no'}")
-    print(f"Hook readable: {'yes' if hook.exists() and os.access(hook, os.R_OK) else 'no'}")
-    print(f"Hook executable: {'yes' if hook.exists() and os.access(hook, os.X_OK) else 'no'}")
-    print(f"Hook mode: {_format_mode(hook) if hook.exists() else 'missing'}")
+    print(f"Hook exists: {'yes' if hook_status['exists'] else 'no'}")
+    print(f"Hook readable: {'yes' if hook_status['readable'] else 'no'}")
+    print(f"Hook executable: {'yes' if hook_status['executable'] else 'no'}")
+    print(f"Hook mode: {hook_status['mode'] if hook_status['exists'] else 'missing'}")
+    print(f"Hook symlink: {'yes' if hook_status['is_symlink'] else 'no'}")
+    if hook_status["is_symlink"]:
+        print(f"Hook symlink target: {hook_status['symlink_target']}")
+        print(f"Hook real path: {hook_status['resolved_path']}")
+    _print_hook_freshness(hook_status)
 
     token_path = installed_tokens_path()
     token_cfg = _load_token_config(token_path)
