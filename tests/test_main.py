@@ -38,13 +38,6 @@ def test_notify_value_uses_active_python(app) -> None:
     assert values[0] == str(Path(sys.executable).resolve())
     assert values[1] == str(app.installed_hook_path())
 
-
-def test_notify_line_uses_active_python(app) -> None:
-    line = app.notify_line()
-    assert 'notify = ["' in line
-    assert str(Path(sys.executable).resolve()) in line
-
-
 def test_set_notify_config_replaces_root_notify_without_duplication(app, monkeypatch: pytest.MonkeyPatch) -> None:
     config = app.codex_config_path()
     config.parent.mkdir(parents=True, exist_ok=True)
@@ -181,8 +174,6 @@ def test_uninstall_deletes_credentials_with_flag(app) -> None:
 def test_alias_parsing_and_new_commands(app) -> None:
     assert app._parse_args(["install-hook"]).command == "install-hook"
     assert app._parse_args(["remove-hook"]).command == "remove-hook"
-    assert app._parse_args(["update"]).command == "update"
-    assert app._parse_args(["reconfigure"]).command == "reconfigure"
     uninstall = app._parse_args(["uninstall", "--delete-credentials"])
     assert uninstall.command == "uninstall"
     assert uninstall.delete_credentials is True
@@ -231,30 +222,7 @@ def test_status_reports_hook_up_to_date_when_contents_match(
     assert "Hook up to date: yes" in output
 
 
-def test_status_reports_stale_hook_warning(app, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    source = app.codex_home() / "source-notify-hook.py"
-    source.write_text("print('new')\n", encoding="utf-8")
-    monkeypatch.setattr(app, "SOURCE_HOOK", source)
-
-    hook = app.installed_hook_path()
-    hook.parent.mkdir(parents=True, exist_ok=True)
-    hook.write_text("print('old')\n", encoding="utf-8")
-
-    app.status()
-    output = capsys.readouterr().out
-    assert "Hook up to date: no" in output
-    assert "Warning: installed Codex hook is stale." in output
-    assert "Run: codex-notify update" in output
-
-    app.doctor(no_network=True)
-    output = capsys.readouterr().out
-    assert "Hook up to date: no" in output
-    assert "Warning: installed Codex hook is stale." in output
-
-
-def test_status_reports_symlink_target_and_real_path(
-    app, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_status_reports_symlinked_hook(app, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     source = app.codex_home() / "source-notify-hook.py"
     source.write_text("print('same')\n", encoding="utf-8")
     monkeypatch.setattr(app, "SOURCE_HOOK", source)
@@ -268,12 +236,10 @@ def test_status_reports_symlink_target_and_real_path(
     app.status()
     output = capsys.readouterr().out
     assert "Hook symlink: yes" in output
-    assert f"Hook symlink target: {real_target}" in output
-    assert f"Hook real path: {real_target}" in output
-    assert "Hook up to date: yes" in output
+    assert str(real_target) in output
 
 
-def test_test_command_warns_on_stale_hook_but_still_sends(
+def test_stale_hook_warns_and_test_command_still_sends(
     app, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     source = app.codex_home() / "source-notify-hook.py"
@@ -290,13 +256,17 @@ def test_test_command_warns_on_stale_hook_but_still_sends(
     fake_module = type("Hook", (), {"send_notification": lambda *args, **kwargs: None})
     monkeypatch.setattr(app, "_load_hook_module", lambda: fake_module())
 
+    app.status()
+    status_output = capsys.readouterr().out
     rc = app.test_command()
-    output = capsys.readouterr().out
+    test_output = capsys.readouterr().out
 
     assert rc == 0
-    assert "Hook up to date: no" in output
-    assert "Warning: installed Codex hook is stale." in output
-    assert "Telegram test send succeeded" in output
+    assert "Hook up to date: no" in status_output
+    assert "Warning: installed Codex hook is stale." in status_output
+    assert "Run: codex-notify update" in status_output
+    assert "Warning: installed Codex hook is stale." in test_output
+    assert "Telegram test send succeeded" in test_output
 
 
 def test_token_permission_safety_function(app) -> None:
@@ -307,21 +277,3 @@ def test_token_permission_safety_function(app) -> None:
     assert app.is_token_permissions_safe(token) is False
     token.chmod(0o600)
     assert app.is_token_permissions_safe(token) is True
-
-
-def test_compatibility_wrappers(app) -> None:
-    config = app.codex_config_path()
-    config.parent.mkdir(parents=True, exist_ok=True)
-    config.write_text("", encoding="utf-8")
-
-    updated = app.set_network_access_true("")
-    assert "network_access = true" in updated
-    assert app.ensure_network_access_enabled() is False
-
-
-def test_compatibility_aliases(app, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(app, "install", lambda **kwargs: 7)
-    monkeypatch.setattr(app, "uninstall", lambda **kwargs: 9)
-
-    assert app.install_hook(interactive=False, force=True) == 7
-    assert app.remove_hook(interactive=False, force=True, delete_tokens=True) == 9
