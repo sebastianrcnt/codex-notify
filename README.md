@@ -129,11 +129,15 @@ codex-notify update
   - `--delete-credentials`를 주면 credential도 삭제
 - `codex-notify test`
   - 현재 credential로 Telegram 테스트 메시지 전송
+  - 설치된 `~/.codex/notify-hook.py`가 패키지 내 최신 hook과 다르면 stale 경고를 표시하지만 테스트는 계속 실행
 - `codex-notify doctor`
   - 진단 전체 실행
+  - 설치된 hook이 최신 패키지 기준으로 up-to-date인지 SHA-256으로 확인
+  - symlink인 경우 target과 실제 파일 경로도 함께 표시
   - `--no-network`로 Telegram 네트워크 테스트 생략
 - `codex-notify status`
   - 설치 상태/경로/권한 요약
+  - 설치된 hook stale 여부와 symlink target 정보를 요약
 - `codex-notify configure-network --enable|--disable`
   - `~/.codex/config.toml`의 `network_access`를 명시적으로 변경
 - alias
@@ -158,6 +162,8 @@ codex-notify update
 - Codex config 존재 여부
 - notify hook 설치 여부
 - hook 파일 존재/권한
+- packaged hook 대비 installed hook up-to-date 여부
+- symlink target / real path
 - token 파일 존재/권한
 - token 로드 가능 여부(마스킹 출력)
 - Telegram 테스트 가능 여부 (`--no-network` 제외 시)
@@ -170,6 +176,8 @@ codex-notify update
   - token/chat_id 오입력 여부 확인 (`codex-notify reconfigure`)
   - 봇에 먼저 메시지를 보내야 하는지 확인
   - 네트워크 차단 여부 확인 (`codex-notify doctor`)
+- `Hook up to date: no`가 보이면:
+  - `codex-notify update` 실행
 - `network_access`가 `false`/`unset`이면 필요 시:
   - `codex-notify configure-network --enable`
 - 로그 확인:
