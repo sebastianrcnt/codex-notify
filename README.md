@@ -1,145 +1,188 @@
-# codex-notify 🔔
+# codex-notify
 
-**codex-notify**는 OpenAI Codex CLI 작업이 완료되었을 때 Telegram으로 알림을 보내주는 편리한 도구입니다.
+`codex-notify`는 Codex CLI의 `notify` 이벤트를 Telegram으로 전달하는 **단방향 알림 도구**입니다.
 
-Codex가 복잡한 코드를 생성하거나 긴 작업을 처리하는 동안 화면만 바라보고 계셨나요? 이제는 다른 업무를 보셔도 됩니다. 작업이 끝나는 순간, 텔레그램이 여러분께 완료 소식을 바로 알려드립니다.
+이 프로젝트의 범위:
+- Codex CLI notify 이벤트 → Telegram 메시지 전송
 
----
+이 프로젝트의 범위가 아닌 것:
+- Telegram에서 Codex를 원격 조종하는 양방향 브릿지
+- Telegram polling/webhook 서버
 
-## 📑 목차
+## 목차
 
-1. [요구사항](https://www.google.com/search?q=%23%EC%9A%94%EA%B5%AC%EC%82%AC%ED%95%AD)
-2. [설치 방법](https://www.google.com/search?q=%23%EC%84%A4%EC%B9%98-%EB%B0%A9%EB%B2%95)
-3. [사전 준비: Telegram 봇 만들기](https://www.google.com/search?q=%23%EC%82%AC%EC%A0%84-%EC%A4%80%EB%B9%84-telegram-%EB%B4%87-%EB%A7%8C%EB%93%A4%EA%B8%B0)
-4. [사용법](https://www.google.com/search?q=%23%EC%82%AC%EC%9A%A9%EB%B2%95)
-5. [동작 원리](https://www.google.com/search?q=%23%EB%8F%99%EC%9E%91-%EC%9B%90%EB%A6%AC)
-6. [설정 파일 및 로그](https://www.google.com/search?q=%23%EC%84%A4%EC%A0%95-%ED%8C%8C%EC%9D%BC-%EB%B0%8F-%EB%A1%9C%EA%B7%B8)
-7. [문제 해결](https://www.google.com/search?q=%23%EB%AC%B8%EC%A0%9C-%ED%95%B4%EA%B2%B0)
+1. [소개](#소개)
+2. [요구사항](#요구사항)
+3. [설치](#설치)
+4. [업데이트](#업데이트)
+5. [빠른 시작](#빠른-시작)
+6. [명령어](#명령어)
+7. [보안 원칙](#보안-원칙)
+8. [진단](#진단)
+9. [문제 해결](#문제-해결)
+10. [제거](#제거)
 
----
+## 소개
 
-## 🛠 요구사항
+- Codex 작업 완료/이벤트를 Telegram으로 짧게 알림합니다.
+- 기본 메시지는 보수적으로 요약해서 전송합니다.
+- 긴 본문은 opt-in일 때만 전송합니다.
 
-시작하기 전에 아래 환경이 갖춰져 있는지 확인해 주세요.
+## 요구사항
 
-* **Python:** 3.9.2 버전 이상
-* **OpenAI Codex CLI:** 설치 및 기본 설정 완료 ([공식 저장소](https://github.com/openai/codex))
-* **Telegram:** 알림을 받을 계정과 봇
+- Python 3.9+
+- Codex CLI
+- Telegram bot token
+- Telegram chat id
 
----
+## 설치
 
-## 🚀 설치 방법
-
-현재 GitHub을 통해 직접 설치하실 수 있습니다.
-
-**pip로 설치하기:**
+권장:
 
 ```bash
-pip install git+https://github.com/sebastianrcnt/codex-notify
-
+uv tool install git+https://github.com/sebastianrcnt/codex-notify
 ```
 
-**pipx로 설치하기 (권장):**
-
-> 전역 CLI 도구로 관리하기 편리하며 의존성 충돌을 방지합니다.
+대안:
 
 ```bash
 pipx install git+https://github.com/sebastianrcnt/codex-notify
-
 ```
 
-설치가 완료되면 터미널에서 `codex-notify --help`를 입력해 정상 작동 여부를 확인해 보세요.
-
----
-
-## 🤖 사전 준비: Telegram 봇 만들기
-
-알림을 보내줄 '비서 봇'을 먼저 만들어야 합니다.
-
-### 1. 봇 토큰 발급받기
-
-1. 텔레그램에서 **[@BotFather](https://t.me/BotFather)**를 찾아 대화를 시작합니다.
-2. `/newbot`을 입력하고 안내에 따라 봇 이름과 사용자명(Username)을 정합니다.
-3. 생성이 완료되면 `123456789:ABC...` 형태의 **API 토큰**이 발급됩니다. 이 토큰은 외부에 노출되지 않게 잘 보관해 주세요.
-
-### 2. 내 Chat ID 확인하기
-
-봇이 나를 찾을 수 있도록 고유 ID가 필요합니다.
-
-1. **[@userinfobot](https://t.me/userinfobot)**에 접속해 `/start`를 보냅니다.
-2. 응답으로 오는 `Id` 항목의 숫자(예: `987654321`)를 메모해 두세요.
-
----
-
-## 💡 사용법
-
-### 1. 온보딩 (간편 설정)
-
-가장 쉬운 방법입니다. 터미널에 아래 명령어를 입력하면 대화형 가이드가 시작됩니다.
+임시 실행:
 
 ```bash
-codex-notify
-
+uvx --from git+https://github.com/sebastianrcnt/codex-notify codex-notify --help
 ```
 
-가이드에 따라 **네트워크 접근 허용, 봇 토큰, Chat ID**를 차례로 입력하면 모든 설정이 끝납니다.
-
-### 2. 수동 훅 설치
-
-가이드 없이 바로 설치하고 싶다면 다음 명령어를 사용하세요.
+설치 후:
 
 ```bash
-codex-notify install-hook
-
+codex-notify install
+codex-notify test
+codex-notify doctor
 ```
 
-* **팁:** 기존에 설정한 토큰 정보를 유지하고 싶다면 `--no-overwrite` 옵션을 추가하세요.
+## 업데이트
 
-### 3. 상태 및 제거
+`codex-notify` 업데이트는 두 단계입니다.
+1) 도구 버전 업데이트
+2) 로컬 안정 경로(`~/.codex/notify-hook.py`)로 hook 갱신
 
-* **설정 확인:** `codex-notify status` (현재 설치 상태와 경로를 한눈에 보여줍니다.)
-* **훅 제거:** `codex-notify remove-hook` (설정된 훅과 관련 파일을 깔끔하게 삭제합니다.)
+### uv 사용자
 
----
+```bash
+uv tool upgrade codex-notify
+codex-notify update
+codex-notify test
+codex-notify doctor
+```
 
-## ⚙️ 동작 방식
+GitHub URL 설치에서 `upgrade`가 애매하면:
 
-작동 과정은 아주 심플합니다.
+```bash
+uv tool install --force git+https://github.com/sebastianrcnt/codex-notify
+codex-notify update
+```
 
-1. **Codex CLI 작업 완료:** 작업이 끝나는 순간 Codex가 이벤트를 발생시킵니다.
-2. **훅 실행:** 설정된 `notify-hook.py`가 실행되며 이벤트 데이터를 읽습니다.
-3. **알림 전송:** 저장된 토큰을 이용해 텔레그램 API를 호출, 사용자에게 메시지를 보냅니다.
+### pipx 사용자
 
-**알림 메시지에는 이런 정보가 담겨요:**
+```bash
+pipx upgrade codex-notify
+codex-notify update
+codex-notify test
+```
 
-* 작업 요약 (응답 첫 줄)
-* 작업이 수행된 폴더 위치 (`folder:`)
-* 사용 중인 호스트명 (`host:`) 및 세션 ID (`sid:`)
+GitHub URL 설치에서 `upgrade`가 동작하지 않으면:
 
----
+```bash
+pipx install --force git+https://github.com/sebastianrcnt/codex-notify
+codex-notify update
+```
 
-## 📂 설정 파일 및 로그
+주의:
+- `uvx`는 임시/캐시 환경일 수 있습니다.
+- Codex notify 설정은 `uvx`/`pipx` 내부 경로를 직접 가리키지 않고, 항상 `~/.codex/notify-hook.py`를 가리키도록 유지해야 합니다.
 
-모든 설정은 `~/.codex/` 폴더 내에서 관리됩니다.
+## 빠른 시작
 
-* `config.toml`: Codex CLI의 메인 설정 파일 (네트워크 및 훅 경로 포함)
-* `notify-hook-tokens.toml`: 여러분의 텔레그램 봇 토큰과 ID가 담긴 파일
-* `log/notify.log`: 알림이 안 올 때 원인을 파악할 수 있는 일기장입니다.
+1. `@BotFather`로 봇 생성 후 token 발급
+2. 알림 받을 chat id 확인
+3. `codex-notify install`
+4. `codex-notify test`
+5. `codex-notify doctor --no-network`
 
----
+## 명령어
 
-## ❓ 문제 해결 (FAQ)
+- `codex-notify install`
+  - hook/config 설치
+  - 기존 `~/.codex/notify-hook-tokens.toml`이 있으면 보존
+- `codex-notify update`
+  - 패키지에 포함된 최신 `notify-hook.py`를 `~/.codex/notify-hook.py`로 갱신
+  - `~/.codex/config.toml`의 `notify`를 안정 경로로 정리
+  - credential은 변경하지 않음
+- `codex-notify reconfigure`
+  - Telegram token/chat_id만 재설정
+- `codex-notify uninstall`
+  - hook/config 제거
+  - credential은 기본 유지
+  - `--delete-credentials`를 주면 credential도 삭제
+- `codex-notify test`
+  - 현재 credential로 Telegram 테스트 메시지 전송
+- `codex-notify doctor`
+  - 진단 전체 실행
+  - `--no-network`로 Telegram 네트워크 테스트 생략
+- `codex-notify status`
+  - 설치 상태/경로/권한 요약
+- `codex-notify configure-network --enable|--disable`
+  - `~/.codex/config.toml`의 `network_access`를 명시적으로 변경
+- alias
+  - `codex-notify install-hook` → `install`
+  - `codex-notify remove-hook` → `uninstall`
 
-**Q. 알림이 오지 않아요!**
+## 보안 원칙
 
-* `codex-notify status`를 입력해 모든 파일이 `exists` 상태인지 확인해 보세요.
-* 텔레그램 봇에게 **먼저 메시지**를 보냈는지 확인해 주세요. (봇은 먼저 말을 걸 수 없습니다.)
-* `~/.codex/log/notify.log` 파일을 열어 에러 메시지가 있는지 살펴봐 주세요.
+- credential 파일: `~/.codex/notify-hook-tokens.toml`
+- credential 파일 권한: `0600` 권장 및 자동 보정 시도
+- `~/.codex` 디렉터리 권한: `0700` 권장 및 자동 보정 시도
+- `install`/`update`는 credential을 기본적으로 덮어쓰지 않음
+- credential 변경은 `reconfigure`에서만
+- `status`/`doctor`/로그에 token/chat_id 원문 노출 금지
+- 메시지 전송 전 민감 패턴(`sk-`, `ghp_`, `github_pat_`, `xoxb-`, `TOKEN=`, `SECRET=`, `PASSWORD=`, `API_KEY=` 등) 마스킹
+- `network_access=true`는 자동으로 켜지지 않음
 
-**Q. 네트워크 관련 오류가 떠요.**
+## 진단
 
-* Codex 샌드박스 설정에서 외부 통신이 차단되어 있을 수 있습니다. `~/.codex/config.toml`에 `network_access = true`가 제대로 들어있는지 확인해 보세요.
+`codex-notify doctor`는 다음을 확인합니다.
+- Python version
+- Codex config 존재 여부
+- notify hook 설치 여부
+- hook 파일 존재/권한
+- token 파일 존재/권한
+- token 로드 가능 여부(마스킹 출력)
+- Telegram 테스트 가능 여부 (`--no-network` 제외 시)
+- `network_access` 현재 상태
+- 로그 파일 위치
 
----
+## 문제 해결
 
-**더 궁금한 점이 있거나 도움이 필요하신가요? 언제든 물어봐 주세요!**
+- Telegram 실패 시:
+  - token/chat_id 오입력 여부 확인 (`codex-notify reconfigure`)
+  - 봇에 먼저 메시지를 보내야 하는지 확인
+  - 네트워크 차단 여부 확인 (`codex-notify doctor`)
+- `network_access`가 `false`/`unset`이면 필요 시:
+  - `codex-notify configure-network --enable`
+- 로그 확인:
+  - `~/.codex/log/notify.log`
+
+## 제거
+
+```bash
+codex-notify uninstall
+```
+
+credential도 함께 삭제하려면:
+
+```bash
+codex-notify uninstall --delete-credentials
+```

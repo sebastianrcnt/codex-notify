@@ -1,100 +1,45 @@
+from __future__ import annotations
+
 import importlib.util
-import logging
+import sys
 from pathlib import Path
 
 import pytest
-try:
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover
-    import tomli as tomllib
 
-EXAMPLE_CODEX_CONFIG = """personality = \"pragmatic\"\nmodel = \"gpt-5.3-codex\"\nmodel_reasoning_effort = \"medium\"\n\n[projects.\"/Users/coolguy/dev/codex-notify\"]\ntrust_level = \"trusted\"\n\n[sandbox_workspace_write]\nnetwork_access = true\n"""
+import main as main_module
 
 
 @pytest.fixture(autouse=True)
-def isolated_codex_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def isolated_codex_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     home = tmp_path / "custom-codex-home"
     monkeypatch.setenv("CODEX_HOME", str(home))
+    monkeypatch.delenv("CODEX_NOTIFY_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("CODEX_NOTIFY_CHAT_ID", raising=False)
+    monkeypatch.delenv("CODEX_NOTIFY_INCLUDE_BODY", raising=False)
+    monkeypatch.delenv("CODEX_NOTIFY_DEBUG", raising=False)
+    home.mkdir(parents=True, exist_ok=True)
+    main_module.LAST_LOGGED_CODEX_HOME = None
     return home
 
 
 @pytest.fixture
-def app(isolated_codex_home: Path):
+def app() -> main_module:
     module_path = Path(__file__).resolve().parents[1] / "main.py"
     spec = importlib.util.spec_from_file_location("codex_notify_main", module_path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    module._last_logged_codex_home = None
+    module.LAST_LOGGED_CODEX_HOME = None
     return module
 
 
-def test_codex_home_uses_env_override_and_logs(
-    app, caplog: pytest.LogCaptureFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    caplog.set_level(logging.INFO)
-    override = tmp_path / "override-home"
-    monkeypatch.setenv("CODEX_HOME", str(override))
-    app._last_logged_codex_home = None
-
-    actual = app.codex_home()
-
-    assert actual == override
-    assert any("Using CODEX_HOME override" in record.message for record in caplog.records)
+def test_notify_value_uses_active_python(app) -> None:
+    values = app.notify_value()
+    assert values[0] == str(Path(sys.executable).resolve())
+    assert values[1] == str(app.installed_hook_path())
 
 
-def test_notify_line_uses_overridden_home(app) -> None:
-    line = app.notify_line()
-    assert line.startswith('notify = ["python3", "')
-    assert str(app.installed_hook_path()) in line
-
-
-def test_notify_line_expands_default_home(app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    fake_home = tmp_path / "fake-home"
-    monkeypatch.delenv("CODEX_HOME", raising=False)
-    monkeypatch.setenv("HOME", str(fake_home))
-    app._last_logged_codex_home = None
-
-    expected_hook = (fake_home / ".codex" / "notify-hook.py").as_posix()
-    assert app.notify_line() == f'notify = ["python3", "{expected_hook}"]'
-    assert app.notify_value() == ["python3", expected_hook]
-    assert "~" not in app.notify_line()
-
-
-def test_set_notify_config_inserts_notify_at_root_top(app, isolated_codex_home: Path) -> None:
-    config = app.codex_config_path()
-    isolated_codex_home.mkdir(parents=True, exist_ok=True)
-    config.write_text(EXAMPLE_CODEX_CONFIG, encoding="utf-8")
-
-    app.set_notify_config()
-
-    updated = config.read_text(encoding="utf-8")
-    first_line = updated.splitlines()[0]
-    assert first_line == app.notify_line()
-    assert "[projects.\"/Users/coolguy/dev/codex-notify\"]" in updated
-    assert "[sandbox_workspace_write]" in updated
-
-
-def test_set_notify_config_keeps_notify_at_root_before_first_section(app, isolated_codex_home: Path) -> None:
-    config = app.codex_config_path()
-    isolated_codex_home.mkdir(parents=True, exist_ok=True)
-    config.write_text(EXAMPLE_CODEX_CONFIG, encoding="utf-8")
-
-    app.set_notify_config()
-
-    updated = config.read_text(encoding="utf-8")
-    parsed = tomllib.loads(updated)
-    first_section_index = updated.find("[")
-    first_notify_index = updated.find("notify =")
-
-    assert "notify" in parsed
-    assert isinstance(parsed["notify"], list)
-    assert first_notify_index != -1
-    assert first_section_index != -1
-    assert first_notify_index < first_section_index
-
-
-def test_set_notify_config_replaces_root_notify_only(app, isolated_codex_home: Path) -> None:
+def test_set_notify_config_replaces_root_notify_without_duplication(app, monkeypatch: pytest.MonkeyPatch) -> None:
     config = app.codex_config_path()
     config.parent.mkdir(parents=True, exist_ok=True)
     config.write_text(
@@ -102,132 +47,169 @@ def test_set_notify_config_replaces_root_notify_only(app, isolated_codex_home: P
         encoding="utf-8",
     )
 
-    app.set_notify_config()
+    monkeypatch.setattr(app, "confirm", lambda *_a, **_kw: True)
+    app.set_notify_config(interactive=True, force=True)
 
     updated = config.read_text(encoding="utf-8")
-    assert updated.splitlines()[0] == app.notify_line()
-    assert "notify = ['python3', '/tmp/section.py']" in updated
+    assert "/tmp/old.py" not in updated
+    assert "/tmp/section.py" in updated
+    assert str(app.installed_hook_path()) in updated
 
 
-def test_remove_notify_config_removes_root_notify_only(app, isolated_codex_home: Path) -> None:
+def test_set_notify_config_noninteractive_fails_for_foreign_notify(app) -> None:
     config = app.codex_config_path()
     config.parent.mkdir(parents=True, exist_ok=True)
-    config.write_text(
-        f"{app.notify_line()}\nmodel = 'x'\n\n[projects.\"x\"]\nnotify = ['python3', '/tmp/section.py']\n",
+    config.write_text("notify = ['python3', '/tmp/foreign.py']\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError):
+        app.set_notify_config(interactive=False, force=False)
+
+
+def test_set_notify_config_creates_backup(app) -> None:
+    config = app.codex_config_path()
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text("model = 'x'\n", encoding="utf-8")
+
+    app.set_notify_config(interactive=True, force=True)
+
+    backups = list(config.parent.glob("config.toml.bak.*"))
+    assert len(backups) == 1
+
+
+def test_install_keeps_existing_credentials(app, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = app.codex_home() / "source-notify-hook.py"
+    source.write_text("print('ok')\n", encoding="utf-8")
+    monkeypatch.setattr(app, "SOURCE_HOOK", source)
+
+    token_file = app.installed_tokens_path()
+    token_file.parent.mkdir(parents=True, exist_ok=True)
+    original = "driver='telegram'\n[telegram]\ntoken='oldtok'\nchat_id='1234'\n"
+    token_file.write_text(original, encoding="utf-8")
+    token_file.chmod(0o644)
+
+    monkeypatch.setattr(app, "prompt_telegram_credentials", lambda: (_ for _ in ()).throw(AssertionError("must not prompt")))
+    rc = app.install(interactive=False, force=True)
+
+    assert rc == 0
+    assert token_file.read_text(encoding="utf-8") == original
+    assert token_file.stat().st_mode & 0o077 == 0
+
+
+def test_install_creates_credentials_when_missing(app, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = app.codex_home() / "source-notify-hook.py"
+    source.write_text("print('ok')\n", encoding="utf-8")
+    monkeypatch.setattr(app, "SOURCE_HOOK", source)
+    monkeypatch.setattr(app, "prompt_telegram_credentials", lambda: ("tok123456:AAAA", "123456789"))
+
+    rc = app.install(interactive=True, force=True)
+
+    assert rc == 0
+    assert app.installed_tokens_path().exists()
+    assert app.installed_tokens_path().stat().st_mode & 0o077 == 0
+
+
+def test_update_does_not_change_credentials(app, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = app.codex_home() / "source-notify-hook.py"
+    source.write_text("print('new')\n", encoding="utf-8")
+    monkeypatch.setattr(app, "SOURCE_HOOK", source)
+
+    token_file = app.installed_tokens_path()
+    token_file.parent.mkdir(parents=True, exist_ok=True)
+    original = "driver='telegram'\n[telegram]\ntoken='keep'\nchat_id='9999'\n"
+    token_file.write_text(original, encoding="utf-8")
+
+    rc = app.update(interactive=False, force=True)
+    assert rc == 0
+    assert token_file.read_text(encoding="utf-8") == original
+
+
+def test_reconfigure_updates_credentials_only(app, monkeypatch: pytest.MonkeyPatch) -> None:
+    token_file = app.installed_tokens_path()
+    token_file.parent.mkdir(parents=True, exist_ok=True)
+    token_file.write_text("driver='telegram'\n[telegram]\ntoken='old'\nchat_id='1'\n", encoding="utf-8")
+    monkeypatch.setattr(app, "prompt_telegram_credentials", lambda: ("newtok123456:ABCD", "98765"))
+
+    rc = app.reconfigure(interactive=True, force=True)
+    assert rc == 0
+    updated = token_file.read_text(encoding="utf-8")
+    assert "newtok123456:ABCD" in updated
+    assert "98765" in updated
+
+
+def test_install_without_force_noninteractive_fails_on_symlink_hook(app, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = app.codex_home() / "source-notify-hook.py"
+    source.write_text("print('ok')\n", encoding="utf-8")
+    monkeypatch.setattr(app, "SOURCE_HOOK", source)
+
+    hook = app.installed_hook_path()
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    real_target = hook.parent / "real.py"
+    real_target.write_text("print('real')\n")
+    hook.symlink_to(real_target)
+
+    result = app.install(interactive=False, force=False)
+    assert result == 1
+
+
+def test_uninstall_keeps_credential_by_default(app) -> None:
+    hook = app.installed_hook_path()
+    token = app.installed_tokens_path()
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    hook.write_text("print('hook')\n")
+    token.write_text("driver = 'telegram'\n", encoding="utf-8")
+
+    app.uninstall(interactive=False, force=False, delete_credentials=False)
+
+    assert not hook.exists()
+    assert token.exists()
+
+
+def test_uninstall_deletes_credentials_with_flag(app) -> None:
+    token = app.installed_tokens_path()
+    token.parent.mkdir(parents=True, exist_ok=True)
+    token.write_text("driver='telegram'\n", encoding="utf-8")
+    app.uninstall(interactive=False, force=False, delete_credentials=True)
+    assert not token.exists()
+
+
+def test_alias_parsing_and_new_commands(app) -> None:
+    assert app._parse_args(["install-hook"]).command == "install-hook"
+    assert app._parse_args(["remove-hook"]).command == "remove-hook"
+    assert app._parse_args(["update"]).command == "update"
+    assert app._parse_args(["reconfigure"]).command == "reconfigure"
+    uninstall = app._parse_args(["uninstall", "--delete-credentials"])
+    assert uninstall.command == "uninstall"
+    assert uninstall.delete_credentials is True
+
+
+def test_status_and_doctor_do_not_leak_tokens(app, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    token_file = app.installed_tokens_path()
+    token_file.parent.mkdir(parents=True, exist_ok=True)
+    token_file.write_text(
+        "driver = 'telegram'\n[telegram]\ntoken='123456:ABCD'\nchat_id='7777'\n",
         encoding="utf-8",
     )
 
-    app.remove_notify_config()
+    fake_module = type("Hook", (), {"send_notification": lambda *args, **kwargs: None})
+    monkeypatch.setattr(app, "_load_hook_module", lambda: fake_module())
 
-    updated = config.read_text(encoding="utf-8")
-    assert app.notify_line() not in updated
-    assert "notify = ['python3', '/tmp/section.py']" in updated
-
-
-def test_network_access_state_variants(app) -> None:
-    assert app.network_access_state("[sandbox_workspace_write]\nnetwork_access = true\n") is True
-    assert app.network_access_state("[sandbox_workspace_write]\nnetwork_access = false\n") is False
-    assert app.network_access_state("[projects.\"x\"]\ntrust_level = \"trusted\"\n") is None
-
-
-def test_set_network_access_true_adds_missing_section(app) -> None:
-    updated = app.set_network_access_true("model = \"x\"\n")
-    assert "[sandbox_workspace_write]" in updated
-    assert "network_access = true" in updated
-
-
-def test_set_network_access_true_updates_existing_false(app) -> None:
-    updated = app.set_network_access_true("[sandbox_workspace_write]\nnetwork_access = false\n")
-    assert "network_access = true" in updated
-    assert "network_access = false" not in updated
-
-
-def test_ensure_network_access_enabled_without_prompt_when_already_true(
-    app, isolated_codex_home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    config = app.codex_config_path()
-    config.parent.mkdir(parents=True, exist_ok=True)
-    config.write_text("[sandbox_workspace_write]\nnetwork_access = true\n", encoding="utf-8")
-
-    def fail_confirm(_: str) -> bool:
-        raise AssertionError("confirm should not be called")
-
-    monkeypatch.setattr(app, "confirm", fail_confirm)
-    assert app.ensure_network_access_enabled() is True
-
-
-def test_ensure_network_access_enabled_updates_after_confirm(
-    app, isolated_codex_home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    config = app.codex_config_path()
-    config.parent.mkdir(parents=True, exist_ok=True)
-    config.write_text("model = \"x\"\n", encoding="utf-8")
-    monkeypatch.setattr(app, "confirm", lambda _: True)
-
-    assert app.ensure_network_access_enabled() is True
-    assert "network_access = true" in config.read_text(encoding="utf-8")
-
-
-def test_install_hook_with_no_overwrite_keeps_existing_tokens(
-    app, isolated_codex_home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    source_hook = isolated_codex_home / "source-notify-hook.py"
-    source_hook.parent.mkdir(parents=True, exist_ok=True)
-    source_hook.write_text("print('hook')\n", encoding="utf-8")
-    monkeypatch.setattr(app, "SOURCE_HOOK", source_hook)
-
-    tokens = app.installed_tokens_path()
-    tokens.parent.mkdir(parents=True, exist_ok=True)
-    tokens.write_text("driver = 'telegram'\n", encoding="utf-8")
-
-    monkeypatch.setattr(app, "prompt_telegram_credentials", lambda: (_ for _ in ()).throw(AssertionError("prompt should not be called")))
-
-    rc = app.install_hook(require_network_check=False, no_overwrite=True)
-
-    assert rc == 0
-    assert app.installed_hook_path().exists()
-    assert tokens.read_text(encoding="utf-8") == "driver = 'telegram'\n"
-    assert app.codex_config_path().read_text(encoding="utf-8").splitlines()[0] == app.notify_line()
-
-
-def test_install_hook_returns_error_when_source_missing(app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(app, "SOURCE_HOOK", tmp_path / "does-not-exist.py")
-    assert app.install_hook(require_network_check=False) == 1
-
-
-def test_remove_hook_deletes_files_and_notify_config(app, isolated_codex_home: Path) -> None:
-    hook = app.installed_hook_path()
-    tokens = app.installed_tokens_path()
-    config = app.codex_config_path()
-
-    hook.parent.mkdir(parents=True, exist_ok=True)
-    hook.write_text("print('hook')\n", encoding="utf-8")
-    tokens.write_text("driver = 'telegram'\n", encoding="utf-8")
-    config.write_text(f"{app.notify_line()}\n{EXAMPLE_CODEX_CONFIG}", encoding="utf-8")
-
-    rc = app.remove_hook()
-
-    assert rc == 0
-    assert not hook.exists()
-    assert not tokens.exists()
-    assert app.notify_line() not in config.read_text(encoding="utf-8")
-
-
-def test_status_reports_current_state(app, isolated_codex_home: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    hook = app.installed_hook_path()
-    tokens = app.installed_tokens_path()
-    config = app.codex_config_path()
-
-    hook.parent.mkdir(parents=True, exist_ok=True)
-    hook.write_text("print('hook')\n", encoding="utf-8")
-    tokens.write_text("driver = 'telegram'\n", encoding="utf-8")
-    config.write_text(f"{app.notify_line()}\n[sandbox_workspace_write]\nnetwork_access = true\n", encoding="utf-8")
-
-    rc = app.status()
+    app.status()
     output = capsys.readouterr().out
+    assert "123456:ABCD" not in output
+    assert "7777" not in output
 
-    assert rc == 0
-    assert "알림 설정 여부: 예" in output
-    assert "샌드박스 network_access: true" in output
-    assert "훅 스크립트:" in output
-    assert "토큰 파일:" in output
+    app.doctor(no_network=True)
+    output = capsys.readouterr().out
+    assert "123456:ABCD" not in output
+    assert "7777" not in output
+    assert "123456...ABCD" in output
+
+
+def test_token_permission_safety_function(app) -> None:
+    token = app.installed_tokens_path()
+    token.parent.mkdir(parents=True, exist_ok=True)
+    token.write_text("driver='telegram'\n", encoding="utf-8")
+    token.chmod(0o644)
+    assert app.is_token_permissions_safe(token) is False
+    token.chmod(0o600)
+    assert app.is_token_permissions_safe(token) is True
