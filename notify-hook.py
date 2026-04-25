@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import html
 import json
 import os
 import re
@@ -133,14 +134,26 @@ def load_tokens(path: Optional[Path] = None) -> Dict[str, Any]:
         raise ValueError(f"Missing telegram.token/chat_id in {token_path}")
 
     include_body = bool(telegram.get("include_body", False) or _bool_from_env("CODEX_NOTIFY_INCLUDE_BODY"))
+    style = str(telegram.get("style", "pretty") or "pretty").strip().lower()
+    if style not in {"plain", "compact", "pretty"}:
+        style = "pretty"
+    show_debug = bool(telegram.get("show_debug", True))
+
     parse_mode = telegram.get("parse_mode")
     if parse_mode is not None:
-        parse_mode = str(parse_mode)
+        parse_mode = str(parse_mode).strip()
+        if parse_mode.lower() in {"", "none", "plain"}:
+            parse_mode = None
+    elif style == "pretty":
+        parse_mode = "HTML"
+
     return {
         "token": token,
         "chat_id": chat_id,
         "include_body": include_body,
         "parse_mode": parse_mode,
+        "style": style,
+        "show_debug": show_debug,
     }
 
 
@@ -157,6 +170,10 @@ def _shorten(text: str, limit: int) -> str:
     return text[: max(0, limit - 1)] + "…"
 
 
+def _h(text: Any) -> str:
+    return html.escape(_safe_text(text), quote=False)
+
+
 def _folder_name(payload: Dict[str, Any]) -> str:
     cwd = _safe_text(payload.get("cwd") or payload.get("workdir") or payload.get("path"))
     if not cwd:
@@ -168,10 +185,44 @@ def _folder_name(payload: Dict[str, Any]) -> str:
 
 
 def _session_short(payload: Dict[str, Any]) -> str:
-    session = _safe_text(payload.get("session_id") or payload.get("session") or payload.get("id"))
-    if not session:
-        return "unknown"
-    return session[:8]
+    candidates = [
+        "session_id",
+        "session",
+        "id",
+        "turn-id",
+        "turn_id",
+        "thread-id",
+        "thread_id",
+    ]
+    for key in candidates:
+        session = _safe_text(payload.get(key))
+        if session:
+            return session[:8]
+    return "unknown"
+
+
+def _first_nonempty_line(text: str) -> str:
+    for line in text.splitlines():
+        line = line.strip()
+        if line:
+            return line
+    return ""
+
+
+def _remaining_body(text: str) -> str:
+    lines = text.splitlines()
+    if not lines:
+        return ""
+
+    first_seen = False
+    rest: list[str] = []
+    for line in lines:
+        if not first_seen and line.strip():
+            first_seen = True
+            continue
+        if first_seen:
+            rest.append(line)
+    return "\n".join(rest).strip()
 
 
 def _clean_summary(payload: Dict[str, Any], include_body: bool) -> str:
@@ -195,10 +246,35 @@ def _clean_summary(payload: Dict[str, Any], include_body: bool) -> str:
     if include_body:
         body = value
     else:
-        # avoid long body by default
-        body = _shorten(value.replace("\n", " "), 180)
+        # Keep notification previews focused on the actual first result line.
+        body = _shorten(_first_nonempty_line(value), 240)
 
     return body.strip()
+
+
+def _request_excerpt(payload: Dict[str, Any], include_body: bool) -> str:
+    messages = payload.get("input-messages") or payload.get("input_messages")
+    if isinstance(messages, list):
+        for item in reversed(messages):
+            text = _safe_text(item)
+            if text:
+                return text if include_body else _shorten(text.replace("\n", " "), 320)
+
+    for key in ("prompt", "request", "user-message", "user_message", "input"):
+        text = _safe_text(payload.get(key))
+        if text:
+            return text if include_body else _shorten(text.replace("\n", " "), 320)
+    return ""
+
+
+def _event_icon(event_type: str) -> str:
+    if event_type == "agent-turn-complete":
+        return "✅"
+    if event_type == "codex-notify-test":
+        return "🔔"
+    if event_type == "codex-notify-doctor":
+        return "🩺"
+    return "📣"
 
 
 def _escape_markdown(text: str, parse_mode: Optional[str]) -> str:
@@ -221,42 +297,120 @@ def _escape_markdown(text: str, parse_mode: Optional[str]) -> str:
     return "".join(out)
 
 
-def format_message(payload: Dict[str, Any], *, include_body: Optional[bool] = None) -> str:
+def _message_context(payload: Dict[str, Any], include: bool) -> Dict[str, str]:
     event_type = _safe_text(payload.get("type") or payload.get("event") or "unknown")
     status_line = _safe_text(
         payload.get("status")
-        or payload.get("summary")
-        or payload.get("message")
         or payload.get("status_line")
         or "Codex turn complete"
     )
     folder = _folder_name(payload)
     host = _safe_text(payload.get("hostname") or payload.get("host") or socket.gethostname())
     session = _session_short(payload)
+    summary = _clean_summary(payload, include)
+    title = _first_nonempty_line(summary) or status_line or "Codex notification"
+    request = _request_excerpt(payload, include)
+    body = _remaining_body(summary) if include else ""
 
+    return {
+        "event": event_type,
+        "status": status_line,
+        "folder": folder,
+        "host": host,
+        "session": session,
+        "summary": summary,
+        "title": _shorten(title.replace("\n", " "), 240),
+        "body": _shorten(body, 2200),
+        "request": request,
+        "client": _safe_text(payload.get("client")),
+    }
+
+
+def _format_plain_message(ctx: Dict[str, str], *, include_body: bool, show_debug: bool) -> str:
+    lines = [
+        f"{_event_icon(ctx['event'])} {ctx['title']}",
+    ]
+    if include_body and ctx["body"]:
+        lines.extend(["", ctx["body"]])
+    if ctx["request"]:
+        lines.extend(["", "요청", ctx["request"]])
+
+    lines.extend(["", f"📁 {ctx['folder']} · 🖥 {ctx['host']} · 🧵 {ctx['session']}"])
+
+    if show_debug:
+        debug_lines = [
+            "",
+            "debug",
+            f"event: {ctx['event']}",
+            f"status: {ctx['status']}",
+            f"folder: {ctx['folder']}",
+            f"host: {ctx['host']}",
+            f"session: {ctx['session']}",
+        ]
+        if ctx["client"]:
+            debug_lines.append(f"client: {ctx['client']}")
+        lines.extend(debug_lines)
+
+    return "\n".join(line for line in lines if line is not None)
+
+
+def _format_pretty_message(ctx: Dict[str, str], *, include_body: bool, show_debug: bool) -> str:
+    lines = [
+        f"{_event_icon(ctx['event'])} <b>{_h(ctx['title'])}</b>",
+    ]
+    if include_body and ctx["body"]:
+        lines.extend(["", _h(ctx["body"])])
+    if ctx["request"]:
+        lines.extend(["", "<b>요청</b>", _h(ctx["request"])])
+
+    lines.extend([
+        "",
+        f"📁 <code>{_h(ctx['folder'])}</code> · 🖥 <code>{_h(ctx['host'])}</code> · 🧵 <code>{_h(ctx['session'])}</code>",
+    ])
+
+    if show_debug:
+        debug = [
+            f"event: {ctx['event']}",
+            f"status: {ctx['status']}",
+            f"folder: {ctx['folder']}",
+            f"host: {ctx['host']}",
+            f"session: {ctx['session']}",
+        ]
+        if ctx["client"]:
+            debug.append(f"client: {ctx['client']}")
+        lines.extend(["", f"<pre>{_h(chr(10).join(debug))}</pre>"])
+
+    return "\n".join(line for line in lines if line is not None)
+
+
+def format_message(
+    payload: Dict[str, Any],
+    *,
+    include_body: Optional[bool] = None,
+    style: str = "pretty",
+    show_debug: bool = True,
+) -> str:
     include = bool(include_body)
     if include_body is None:
         include = _bool_from_env("CODEX_NOTIFY_INCLUDE_BODY")
 
-    summary = _clean_summary(payload, include)
+    ctx = _message_context(payload, include)
+    normalized_style = (style or "pretty").strip().lower()
 
-    lines = [
-        f"event: {event_type}",
-        f"status: {status_line}",
-        f"folder: {folder}",
-        f"host: {host}",
-        f"session: {session}",
-        "summary:",
-        summary,
-    ]
+    if normalized_style == "compact":
+        msg = f"{_event_icon(ctx['event'])} {ctx['title']}\n📁 {ctx['folder']} · 🖥 {ctx['host']} · 🧵 {ctx['session']}"
+    elif normalized_style == "plain":
+        msg = _format_plain_message(ctx, include_body=include, show_debug=show_debug)
+    else:
+        msg = _format_pretty_message(ctx, include_body=include, show_debug=show_debug)
 
-    msg = "\n".join(line for line in lines if line)
-    if not include and len(msg) > 500:
-        msg = _shorten(msg, 500)
+    if not include and len(msg) > 1000:
+        msg = _shorten(msg, 1000)
     else:
         msg = _shorten(msg, MAX_MESSAGE_LEN)
 
     return msg
+
 
 def _is_parse_error(status_code: int, payload: Dict[str, Any]) -> bool:
     if status_code != 400:
@@ -300,7 +454,8 @@ def _send_once(token: str, chat_id: str, text: str, parse_mode: Optional[str]) -
         "disable_web_page_preview": "true",
     }
     if parse_mode:
-        payload["text"] = _escape_markdown(text, parse_mode)
+        if str(parse_mode).strip().lower() in {"markdown", "markdownv2"}:
+            payload["text"] = _escape_markdown(text, parse_mode)
         payload["parse_mode"] = parse_mode
 
     status, raw, response = _post_message(url, payload)
@@ -315,8 +470,10 @@ def send_notification(payload: Dict[str, Any], *, tokens_path: Optional[Path] = 
     chat_id = token_cfg["chat_id"]
     include_body = token_cfg.get("include_body")
     parse_mode = token_cfg.get("parse_mode")
+    style = str(token_cfg.get("style") or "pretty")
+    show_debug = bool(token_cfg.get("show_debug", True))
 
-    message = format_message(payload, include_body=bool(include_body))
+    message = format_message(payload, include_body=bool(include_body), style=style, show_debug=show_debug)
     message = redact_secrets(message, known_tokens=[token, chat_id])
     redacted_token = _to_redacted_token(token)
 
@@ -327,7 +484,9 @@ def send_notification(payload: Dict[str, Any], *, tokens_path: Optional[Path] = 
     except RuntimeError as exc:
         if parse_mode and _is_parse_error(400, {"description": str(exc)}):
             _log_event(payload, "retry", token_hint=redacted_token, error=str(exc))
-            _send_once(token, chat_id, message, parse_mode=None)
+            fallback = format_message(payload, include_body=bool(include_body), style="plain", show_debug=show_debug)
+            fallback = redact_secrets(fallback, known_tokens=[token, chat_id])
+            _send_once(token, chat_id, fallback, parse_mode=None)
             _log_event(payload, "success", token_hint=redacted_token, status_code=200)
             return
         _log_event(payload, "failure", token_hint=redacted_token, status_code=400, error=str(exc))
